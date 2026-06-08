@@ -1,0 +1,13 @@
+# Backupy / archiwa
+*.rar
+*.zip
+*.7z
+*.bak
+
+# Claude / lokalne narzedzia i ustawienia
+.claude/
+
+# Smieci systemowe
+Thumbs.db
+desktop.ini
+.DS_Store

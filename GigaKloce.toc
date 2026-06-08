@@ -1,0 +1,16 @@
+## Interface: 70300
+## Title: GigaKloce
+## Notes: Lomqe bandit
+## Author: Alvcard
+## Version: 1.0
+## SavedVariables: GigaKloceDB
+
+GigaKloce_Core.lua
+GigaKloce_Util.lua
+GigaKloce_Lists.lua
+GigaKloce_Keys.lua
+GigaKloce_Party.lua
+GigaKloce_Snapshots.lua
+GigaKloce_Guilds.lua
+GigaKloce_UI.lua
+GigaKloce_Events.lua
