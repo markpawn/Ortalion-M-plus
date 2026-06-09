@@ -85,6 +85,15 @@ function GK.ClassOf(name)
     return c and c.class
 end
 
+-- Gildia gracza po nicku (siebie z GetGuildInfo; inni z presence). nil gdy nieznana.
+function GK.GuildOf(name)
+    if not name then return nil end
+    local n = normalizeName(name)
+    if n == normalizeName(GetUnitFullName("player")) then return GetGuildInfo("player") end
+    local u = addonUsers[n]
+    return u and u.guild
+end
+
 -- Spec gracza po nicku (siebie z GetSpecialization; potem live presence; na koniec cache). nil gdy nieznany.
 function GK.SpecOf(name)
     if not name then return nil end

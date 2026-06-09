@@ -67,24 +67,44 @@ function GK.GetMyKeystone()
     return nil
 end
 
+-- Wlasna PUBLIC note z gildii (z rostera). "" gdy brak/gildia nie wczytana. Officer note NIE ruszamy.
+local function myGuildNote()
+    if not IsInGuild() then return "" end
+    if type(GuildRoster) == "function" then GuildRoster() end   -- odswiez (async; czytamy co jest w cache)
+    local me = UnitName("player")
+    for i = 1, (GetNumGuildMembers() or 0) do
+        local name, _, _, _, _, _, publicNote = GetGuildRosterInfo(i)
+        if name then
+            local nm = strsplit("-", name)   -- roster bywa "Nick-Realm"
+            if nm == me then return publicNote or "" end
+        end
+    end
+    return ""
+end
+
 -- Rozglasza Twoj klucz po KANALE (cicho, cross-guild) i zapisuje lokalnie.
 function GK.BroadcastMyKey()
     local dungeon, level = GK.GetMyKeystone()
     if not dungeon then return end
     local me = GetUnitFullName("player")
-    guildKeys[normalizeName(me)] = { name = displayName(me), dungeon = dungeon, level = level or 0, t = GetTime() }
+    local _, ilvl = GetAverageItemLevel()
+    ilvl = math.floor((ilvl or 0) + 0.5)
+    local note = (myGuildNote():gsub("[%c~]", " ")):sub(1, 60)   -- bez znakow kontrolnych/~, limit
+    guildKeys[normalizeName(me)] = { name = displayName(me), dungeon = dungeon, level = level or 0, ilvl = ilvl, note = note, t = GetTime() }
     local s = GK.CHAN_SEP
-    GK.SendChan("K" .. s .. (tostring(dungeon):gsub("[%c~]", " ")) .. s .. (level or 0))
+    GK.SendChan("K" .. s .. (tostring(dungeon):gsub("[%c~]", " ")) .. s .. (level or 0) .. s .. ilvl .. s .. note)
     if KloceFrame and KloceFrame.mode == "keys" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
 end
 
 -- Odbior klucza z kanalu (pola juz rozbite przez parser w Events).
-function GK.ReceiveKey(sender, dungeon, lvl)
+function GK.ReceiveKey(sender, dungeon, lvl, ilvl, note)
     if not dungeon or dungeon == "" then return end
     guildKeys[normalizeName(sender)] = {
         name = displayName(sender),
         dungeon = dungeon,
         level = tonumber(lvl) or 0,
+        ilvl = tonumber(ilvl) or 0,
+        note = note or "",
         t = GetTime(),
     }
     if KloceFrame and KloceFrame.mode == "keys" and KloceFrame.RefreshList then

@@ -310,8 +310,8 @@ f:SetScript("OnEvent", function(self, event, ...)
                 if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
                 if KloceFrame.RefreshList then KloceFrame.RefreshList() end
             end
-        elseif typ == "K" then      -- klucz: dungeon, level
-            if GK.ReceiveKey then GK.ReceiveKey(sender, parts[2], tonumber(parts[3])) end
+        elseif typ == "K" then      -- klucz: dungeon, level, ilvl, note
+            if GK.ReceiveKey then GK.ReceiveKey(sender, parts[2], tonumber(parts[3]), tonumber(parts[4]), parts[5]) end
         end
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, msg, channel, sender = ...

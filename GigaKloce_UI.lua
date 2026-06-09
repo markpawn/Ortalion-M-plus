@@ -762,10 +762,9 @@ local function CreateKloceUI()
     local function RefreshList()
         contentLeft:SetWidth(math.max(scrollLeft:GetWidth(), 50))
 
-        -- Tryb Keys: lista kluczy M+ z gildii (auto-sync). Sekcje: Party (sklad) najpierw, potem Guild.
+        -- Tryb Keys: Party (Twoj sklad) na gorze, potem reszta pogrupowana po GILDII (Z->A), "No Guild" na koncu.
         if KloceFrame.mode == "keys" then
             local keys = (GK.GetSortedKeys and GK.GetSortedKeys()) or {}
-            -- zbior nickow ze skladu (+ Ty)
             local inParty = {}
             if IsInGroup() then
                 for i = 1, GetNumGroupMembers() do
@@ -774,17 +773,34 @@ local function CreateKloceUI()
                 end
             end
             inParty[normalizeName(GetUnitFullName("player"))] = true
-            -- partycja: party first, kolejnosc wg poziomu zachowana z GetSortedKeys
-            local grp, oth = {}, {}
+            local NOGUILD = "\255noguild"   -- sentinel: kubel "bez gildii"
+            local party, buckets, order = {}, {}, {}
             for _, k in ipairs(keys) do
-                if inParty[normalizeName(k.name)] then table.insert(grp, k) else table.insert(oth, k) end
+                if inParty[normalizeName(k.name)] then
+                    table.insert(party, k)              -- czlonkowie skladu -> sekcja Party (na gorze)
+                else
+                    local g = (GK.GuildOf and GK.GuildOf(k.name)) or ""
+                    local bk = (g ~= "" and g) or NOGUILD
+                    if not buckets[bk] then buckets[bk] = {}; order[#order + 1] = bk end
+                    table.insert(buckets[bk], k)        -- kolejnosc wg poziomu zachowana z GetSortedKeys
+                end
             end
-            -- zbuduj liste pozycji z naglowkami sekcji
+            table.sort(order, function(a, b)   -- gildie Z->A; "No Guild" zawsze na koniec
+                if a == NOGUILD then return false end
+                if b == NOGUILD then return true end
+                return a > b
+            end)
             local items = {}
-            if #grp > 0 then items[#items+1] = { header = "Party (" .. #grp .. ")" }
-                for _, k in ipairs(grp) do items[#items+1] = k end end
-            if #oth > 0 then items[#items+1] = { header = "Guild (" .. #oth .. ")" }
-                for _, k in ipairs(oth) do items[#items+1] = k end end
+            if #party > 0 then
+                items[#items + 1] = { header = "Party (" .. #party .. ")" }
+                for _, k in ipairs(party) do items[#items + 1] = k end
+            end
+            for _, bk in ipairs(order) do
+                local list = buckets[bk]
+                local label = (bk == NOGUILD) and "No Guild" or bk
+                items[#items + 1] = { header = label .. " (" .. #list .. ")" }
+                for _, k in ipairs(list) do items[#items + 1] = k end
+            end
 
             leftEmpty:SetText("No keys yet — guildies need GigaKloce running.")
             if #items == 0 then leftEmpty:Show() else leftEmpty:Hide() end
@@ -794,15 +810,32 @@ local function CreateKloceUI()
                 row.chip:Hide(); row.chip:SetWidth(1)
                 row.icon:Hide()
                 row.btn:Hide()
-                row:SetScript("OnClick", nil)
                 if it.header then
+                    row:SetScript("OnClick", nil)
                     row.text:SetText("|cffffd200" .. it.header .. "|r")
                     row.text:SetTextColor(1, 0.82, 0)
                 else
                     local cls = GK.ClassOf and GK.ClassOf(it.name)
-                    row.text:SetText("  " .. classIcon(cls) .. classNameStr(displayName(it.name), cls)
-                        .. "  |cff888888—|r  " .. (it.dungeon or "?") .. "   " .. keyLvlStr(it.level))
+                    local ilvlStr = (it.ilvl and it.ilvl > 0) and ("  |cff9d9d9d" .. it.ilvl .. " ilvl|r") or ""
+                    local noteStr = (it.note and it.note ~= "") and ("  |cff6688aa" .. it.note .. "|r") or ""
+                    row.text:SetText("  " .. classIcon(cls) .. classNameStr(displayName(it.name), cls) .. ilvlStr
+                        .. "  |cff888888—|r  " .. (it.dungeon or "?") .. "   " .. keyLvlStr(it.level) .. noteStr)
                     row.text:SetTextColor(1, 1, 1)
+                    -- prawy klik = menu kontekstowe (target / invite / whisper / inspect)
+                    local who = displayName(it.name)
+                    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                    row:SetScript("OnClick", function(_, button)
+                        if button ~= "RightButton" then return end
+                        local menu = {
+                            { text = who, isTitle = true, notCheckable = true },
+                            { text = "Invite", notCheckable = true,
+                              func = function() if InviteUnit then InviteUnit(who) end end },
+                            { text = "Whisper", notCheckable = true,
+                              func = function() if ChatFrame_SendTell then ChatFrame_SendTell(who) end end },
+                            { text = "Cancel", notCheckable = true, func = function() end },
+                        }
+                        EasyMenu(menu, userMenu, "cursor", 0, 0, "MENU")
+                    end)
                 end
             end
             for i = #items + 1, #KloceFrame.items do KloceFrame.items[i]:Hide() end
