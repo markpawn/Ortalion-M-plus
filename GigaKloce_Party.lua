@@ -2,8 +2,8 @@
 -- GigaKloce :: Party (presence + presety skladu + invite)
 -- ============================
 local ADDON, GK = ...
-local AddonPrefix, MSG_HI, addonUsers, userCache, log, displayName, normalizeName, GetUnitFullName =
-    GK.AddonPrefix, GK.MSG_HI, GK.addonUsers, GK.userCache, GK.log, GK.displayName, GK.normalizeName, GK.GetUnitFullName
+local AddonPrefix, addonUsers, userCache, log, displayName, normalizeName, GetUnitFullName =
+    GK.AddonPrefix, GK.addonUsers, GK.userCache, GK.log, GK.displayName, GK.normalizeName, GK.GetUnitFullName
 local MSG_FLAG = GK.MSG_FLAG
 
 local PRESENCE_STALE = 120   -- po tylu s bez "HI" uznajemy gracza za offline/bez addonu
@@ -32,35 +32,43 @@ local function cacheUser(name, class, spec)
 end
 GK.CacheUser = function(name, class, spec) cacheUser(name, class, spec) end
 
--- ===== Presence =====
--- "HI:" class \031 spec \031 admin(1/0) \031 blocked(1/0) \031 dataVersion
+-- ===== Presence (po KANALE czatu, cross-guild) =====
+-- payload: "H ~ class ~ spec ~ admin ~ blocked ~ ver ~ guild" (separator GK.CHAN_SEP, drukowalny)
+local function cleanChan(s) return (tostring(s or "")):gsub("[%c~]", " ") end
 function GK.BroadcastPresence()
-    if IsInGuild() then
-        local _, classFile = UnitClass("player")   -- np. "MAGE" (niezalezne od jezyka)
-        local adminBit   = (GK.AmIAdmin and GK.AmIAdmin()) and "1" or "0"
-        local blockedBit = (GK.AmIBlocked and GK.AmIBlocked()) and "1" or "0"
-        SendAddonMessage(AddonPrefix, MSG_HI .. (classFile or "") .. PRES_SEP .. myOwnSpec()
-            .. PRES_SEP .. adminBit .. PRES_SEP .. blockedBit .. PRES_SEP .. (GK.DATA_VERSION or 0), "GUILD")
-    end
+    local _, classFile = UnitClass("player")   -- np. "MAGE" (niezalezne od jezyka)
+    local adminBit   = (GK.AmIAdmin and GK.AmIAdmin()) and "1" or "0"
+    local blockedBit = (GK.AmIBlocked and GK.AmIBlocked()) and "1" or "0"
+    local guild = GetGuildInfo("player") or ""
+    local s = GK.CHAN_SEP
+    GK.SendChan("H" .. s .. (classFile or "") .. s .. cleanChan(myOwnSpec())
+        .. s .. adminBit .. s .. blockedBit .. s .. (GK.DATA_VERSION or 0) .. s .. cleanChan(guild))
 end
 
-function GK.ReceivePresence(sender, payload)
-    local class, spec, adm, blk, ver = strsplit(PRES_SEP, payload or "", 5)
+-- Wolane z parsera kanalu (Events): pola juz rozbite.
+function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild)
     if class == "" then class = nil end
     if spec == "" then spec = nil end
     local k = normalizeName(sender)
     addonUsers[k] = {
         name = displayName(sender), class = class, spec = spec, t = GetTime(),
         admin = (adm == "1") or GK.IsSuperAdmin(sender), blocked = (blk == "1"),
-        version = tonumber(ver) or 1,   -- brak wersji = stary klient (v1)
+        version = tonumber(ver) or 1,   -- brak wersji = stary klient
+        guild = (guild and guild ~= "" and guild) or nil,
     }
     cacheUser(sender, class, spec)   -- zawsze pisz do trwalego cache (klasa/spec)
 end
 
--- Czy nadawca ma te sama wersje modelu danych co my? (sync tylko miedzy zgodnymi wersjami)
+-- Czy nadawca ma te sama wersje modelu danych co my?
 function GK.VersionOK(sender)
     local u = addonUsers[normalizeName(sender)]
     return u ~= nil and u.version == GK.DATA_VERSION
+end
+-- Czy wersja nadawcy jest ZNANA i INNA niz nasza? (nieznana = akceptuj — presence moze jeszcze nie dojsc,
+-- a format list jest stabilny; gate ma blokowac tylko realnie inne wersje formatu).
+function GK.VersionBad(sender)
+    local u = addonUsers[normalizeName(sender)]
+    return u ~= nil and u.version ~= nil and u.version ~= GK.DATA_VERSION
 end
 
 -- Klasa gracza po nicku (siebie z UnitClass; potem live presence; na koniec trwaly cache). nil gdy nieznana.
@@ -228,10 +236,13 @@ end
 -- inaczej "najnizszy" nick online z addonem (deterministycznie). Zwraca nick do szeptu albo nil.
 function GK.PickSyncSource()
     local me = normalizeName(GetUnitFullName("player"))
+    local myGuild = GetGuildInfo("player")
     local now = GetTime()
-    -- zablokowany NIE moze byc zrodlem (i tak nie odpowie — nie wysyla danych)
+    -- Zrodlo MUSI byc z TEJ SAMEJ gildii (odpowiedz na SYNC? leci po GUILD, dotrze tylko do gildii).
+    -- Zablokowany nie moze byc zrodlem (i tak nie odsyla danych). Cross-guild = osobny most whisper.
     local function ok(k, v)
         return k ~= me and v and not v.blocked and (now - (v.t or 0)) <= PRESENCE_STALE
+            and myGuild and v.guild == myGuild
     end
     local pref = GigaKloceDB.syncSource
     if pref and pref ~= "" then
@@ -255,7 +266,7 @@ function GK.GetOnlineAddonUsers()
         if (now - (v.t or 0)) > PRESENCE_STALE then
             addonUsers[k] = nil
         else
-            table.insert(list, { name = v.name, class = v.class, spec = v.spec, admin = v.admin, blocked = v.blocked, version = v.version })
+            table.insert(list, { name = v.name, class = v.class, spec = v.spec, admin = v.admin, blocked = v.blocked, version = v.version, guild = v.guild })
         end
     end
     table.sort(list, function(a, b) return (a.name or "") < (b.name or "") end)

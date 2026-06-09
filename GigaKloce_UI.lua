@@ -930,7 +930,8 @@ local function CreateKloceUI()
                 local vstr
                 if u.version == GK.DATA_VERSION then vstr = "  |cff888888v" .. u.version .. "|r"
                 else vstr = "  |cffff5555v" .. (u.version or "?") .. "|r" end
-                row.text:SetText(oicon .. displayName(u.name) .. vstr .. flags)
+                local gstr = (u.guild and u.guild ~= "") and ("  |cff7f7f7f<" .. u.guild .. ">|r") or ""
+                row.text:SetText(oicon .. displayName(u.name) .. gstr .. vstr .. flags)
                 local cc = u.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[u.class]
                 if cc then row.text:SetTextColor(cc.r, cc.g, cc.b) else row.text:SetTextColor(0.8, 0.9, 1) end
                 -- klik (tylko admin): menu nadawania flag admin/blocked
@@ -946,6 +947,18 @@ local function CreateKloceUI()
                         menu[#menu + 1] = { text = "Blocked", isNotRadio = true, keepShownOnClick = false,
                             checked = function() return u.blocked end,
                             func = function() if GK.SetUserFlags then GK.SetUserFlags(u.name, u.admin, not u.blocked) end end }
+                        if iAmSuper then   -- MOST cross-guild (tylko Alvcard)
+                            local who = u.name
+                            menu[#menu + 1] = { text = "|cffffd200Pull sync (cross-guild)|r", notCheckable = true,
+                                func = function() if GK.Send then GK.Send(GK.MSG_BREQ, "WHISPER", who) end
+                                    GK.out("Bridge: poprosilem " .. displayName(who) .. " o stan.") end }
+                            menu[#menu + 1] = { text = "|cffffd200Push sync (cross-guild)|r", notCheckable = true,
+                                func = function() if GK.FullBroadcast then GK.FullBroadcast(true, "WHISPER", who) end
+                                    GK.out("Bridge: wyslalem swoj stan do " .. displayName(who) .. ".") end }
+                            menu[#menu + 1] = { text = "|cffffd200Force their guild-share|r", notCheckable = true,
+                                func = function() if GK.Send then GK.Send(GK.MSG_FSHARE, "WHISPER", who) end
+                                    GK.out("Bridge: kazalem " .. displayName(who) .. " zrobic share.") end }
+                        end
                         menu[#menu + 1] = { text = "Cancel", notCheckable = true, func = function() end }
                         EasyMenu(menu, userMenu, "cursor", 0, 0, "MENU")
                     end)

@@ -2,8 +2,8 @@
 -- GigaKloce :: Keys (klucze M+ — detekcja, broadcast, odbior)
 -- ============================
 local ADDON, GK = ...
-local AddonPrefix, MSG_KEY, guildKeys, KLOCE_SEP, log, displayName, normalizeName, GetUnitFullName =
-    GK.AddonPrefix, GK.MSG_KEY, GK.guildKeys, GK.KLOCE_SEP, GK.log, GK.displayName, GK.normalizeName, GK.GetUnitFullName
+local AddonPrefix, guildKeys, log, displayName, normalizeName, GetUnitFullName =
+    GK.AddonPrefix, GK.guildKeys, GK.log, GK.displayName, GK.normalizeName, GK.GetUnitFullName
 
 local KEYSTONE_ID = 138019   -- Mythic Keystone (Legion)
 local KEY_STALE = 180        -- po tylu sekundach bez odswiezenia uznajemy klucz za nieaktualny
@@ -67,21 +67,19 @@ function GK.GetMyKeystone()
     return nil
 end
 
--- Rozglasza Twoj klucz po GUILD (cicho) i zapisuje go lokalnie (zebys widzial siebie w zakladce).
+-- Rozglasza Twoj klucz po KANALE (cicho, cross-guild) i zapisuje lokalnie.
 function GK.BroadcastMyKey()
     local dungeon, level = GK.GetMyKeystone()
     if not dungeon then return end
     local me = GetUnitFullName("player")
     guildKeys[normalizeName(me)] = { name = displayName(me), dungeon = dungeon, level = level or 0, t = GetTime() }
-    if IsInGuild() then
-        SendAddonMessage(AddonPrefix, MSG_KEY .. dungeon .. KLOCE_SEP .. (level or 0), "GUILD")
-    end
+    local s = GK.CHAN_SEP
+    GK.SendChan("K" .. s .. (tostring(dungeon):gsub("[%c~]", " ")) .. s .. (level or 0))
     if KloceFrame and KloceFrame.mode == "keys" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
 end
 
--- Odbior klucza od kogos z gildii -> zapis do ulotnej tabeli.
-function GK.ReceiveKey(sender, payload)
-    local dungeon, lvl = strsplit(KLOCE_SEP, payload, 2)
+-- Odbior klucza z kanalu (pola juz rozbite przez parser w Events).
+function GK.ReceiveKey(sender, dungeon, lvl)
     if not dungeon or dungeon == "" then return end
     guildKeys[normalizeName(sender)] = {
         name = displayName(sender),

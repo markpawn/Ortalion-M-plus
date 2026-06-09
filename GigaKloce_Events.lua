@@ -4,13 +4,10 @@
 local ADDON, GK = ...
 local AddonPrefix, MSG_KADD, MSG_KREM, MSG_CADD, MSG_CREM, KLOCE_TAGS, DEFAULT_TAG, TAG_COLORS, TAG_ICONS, gigakloce, gigachad, gigakloceInfo, sessionKloceToStay, promptedKloce, InitSaved, log, normalizeName, canonicalDisplay, displayName, GetUnitFullName, ensureRealm, has_value, getIndex, RosterUnitName, ClassifyMember, HasKloceInGroup, UpdateKloceAlert, DetectKloceInGroup, GetGroupLeadersAndAssistants, RefreshUI, EnsureKloceInfo, GetKloceInfo, KLOCE_SEP, BroadcastKloceDetails, AddKloce, RemoveKloce, AddChad, RemoveChad, sendRepartyLeader, MakeDailySnapshot, RestoreSnapshot, ShowKloceUI, CreateKloceButton = GK.AddonPrefix, GK.MSG_KADD, GK.MSG_KREM, GK.MSG_CADD, GK.MSG_CREM, GK.KLOCE_TAGS, GK.DEFAULT_TAG, GK.TAG_COLORS, GK.TAG_ICONS, GK.gigakloce, GK.gigachad, GK.gigakloceInfo, GK.sessionKloceToStay, GK.promptedKloce, GK.InitSaved, GK.log, GK.normalizeName, GK.canonicalDisplay, GK.displayName, GK.GetUnitFullName, GK.ensureRealm, GK.has_value, GK.getIndex, GK.RosterUnitName, GK.ClassifyMember, GK.HasKloceInGroup, GK.UpdateKloceAlert, GK.DetectKloceInGroup, GK.GetGroupLeadersAndAssistants, GK.RefreshUI, GK.EnsureKloceInfo, GK.GetKloceInfo, GK.KLOCE_SEP, GK.BroadcastKloceDetails, GK.AddKloce, GK.RemoveKloce, GK.AddChad, GK.RemoveChad, GK.sendRepartyLeader, GK.MakeDailySnapshot, GK.RestoreSnapshot, GK.ShowKloceUI, GK.CreateKloceButton
 local onOff = GK.onOff
-local BroadcastMyKey, ReceiveKey = GK.BroadcastMyKey, GK.ReceiveKey
-local MSG_KEY = GK.MSG_KEY
-local MSG_HI = GK.MSG_HI
 local MSG_GADD, MSG_GREM = GK.MSG_GADD, GK.MSG_GREM
 local MSG_SYNC = GK.MSG_SYNC
-local MSG_HIQ = GK.MSG_HIQ
 local MSG_FLAG = GK.MSG_FLAG
+local MSG_BREQ, MSG_FSHARE = GK.MSG_BREQ, GK.MSG_FSHARE
 local reparty, repartyLeader, repartyType, repartyStage = {}, nil, nil, nil
 
 -- ============================
@@ -151,25 +148,42 @@ SlashCmdList["KLOCE"] = function(msg)
         if GK.ShareAll then GK.ShareAll() end   -- push pelnego stanu na gildie (recznie)
 
     elseif cmd == "sync" then
-        -- recznie: pociagnij stan od wybranego zrodla (preferowane lub najnizszy online)
-        if GK.Send then GK.Send(MSG_HIQ) end   -- odswiez kto online
-        C_Timer.After(2, function()
-            local src = GK.PickSyncSource and GK.PickSyncSource()
-            if src then GK.Send(MSG_SYNC, "WHISPER", src); log("Requesting sync from " .. src .. " ...")
-            else log("No addon users online to sync from.") end
-        end)
+        -- recznie: pull stanu od zrodla z TEJ SAMEJ gildii
+        local src = GK.PickSyncSource and GK.PickSyncSource()
+        if src and GK.Send then GK.Send(MSG_SYNC, "WHISPER", src); log("Requesting sync from " .. src .. " ...")
+        else log("No same-guild addon user online to sync from.") end
 
     elseif cmd == "syncfrom" then
         if rest == "" or string.lower(rest) == "clear" or string.lower(rest) == "auto" then
             GigaKloceDB.syncSource = nil
-            log("Sync source: auto (lowest online).")
+            log("Sync source: auto (lowest online, same guild).")
         else
             GigaKloceDB.syncSource = rest
-            log("Sync source set to: " .. rest .. " (used on login if online).")
+            log("Sync source set to: " .. rest .. " (used on login if online & same guild).")
+        end
+
+    elseif cmd == "pull" or cmd == "push" or cmd == "forceshare" then
+        -- MOST cross-guild: tylko Alvcard
+        if not (GK.IsSuperAdmin and GK.IsSuperAdmin(UnitName("player"))) then
+            log("Cross-guild bridge: tylko Alvcard.")
+            return
+        end
+        local name = (rest ~= "" and rest)
+            or (UnitExists("target") and UnitIsPlayer("target") and GetUnitFullName("target"))
+        if not name or name == "" then log("Usage: /kloce " .. cmd .. " <nick>"); return end
+        if cmd == "pull" then
+            GK.Send(GK.MSG_BREQ, "WHISPER", name)
+            log("Bridge: poprosilem " .. name .. " o stan (przyjdzie szeptem).")
+        elseif cmd == "push" then
+            if GK.FullBroadcast then GK.FullBroadcast(true, "WHISPER", name) end
+            log("Bridge: wyslalem swoj stan do " .. name .. " (szeptem).")
+        else  -- forceshare
+            GK.Send(GK.MSG_FSHARE, "WHISPER", name)
+            log("Bridge: kazalem " .. name .. " zrobic share w jego gildii.")
         end
 
     else
-        log("Usage: /kloce add <nick>, remove <nick>, list, show, reset, share, sync, syncfrom <nick|auto>, guild <add|remove|list>  |  chads: /chad")
+        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild | bridge (Alvcard): pull/push/forceshare <nick> | chads: /chad")
     end
 end
 
@@ -232,6 +246,7 @@ f:RegisterEvent("PARTY_LEADER_CHANGED")
 f:RegisterEvent("INSPECT_READY")
 f:RegisterEvent("LFG_LIST_APPLICANT_LIST_UPDATED")
 f:RegisterEvent("WHO_LIST_UPDATE")
+f:RegisterEvent("CHAT_MSG_CHANNEL")   -- presence + klucze (cross-guild) ida zwyklym czatem na kanale
 
 f:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -240,15 +255,18 @@ f:SetScript("OnEvent", function(self, event, ...)
         RegisterAddonMessagePrefix(AddonPrefix)
         CreateKloceButton()
         log("Addon loaded. Use /kloce")
-        -- rozglaszanie wlasnego klucza M+ co 30 s (cicho, GUILD) + pierwszy raz po 8 s
+        -- dolacz do kanalu (presence+klucze cross-guild); ponawiamy, bo czat bywa nie gotowy od razu
+        if GK.JoinSyncChannel then
+            GK.JoinSyncChannel()
+            C_Timer.After(4, function() if GK.JoinSyncChannel then GK.JoinSyncChannel() end end)
+        end
+        -- presence+klucze po kanale; push list po GUILD (do gildii) — pierwszy raz po 8 s
         C_Timer.After(8, function()
-            if GK.BroadcastMyKey then GK.BroadcastMyKey() end
-            if GK.BroadcastPresence then GK.BroadcastPresence() end
-            -- auto-sync: wypchnij swoj stan (push, gildia) i zapytaj kto online (do wyboru zrodla pull)
-            if GK.FullBroadcast then GK.FullBroadcast() end
-            if GK.Send then GK.Send(MSG_HIQ) end
+            if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- kanal
+            if GK.BroadcastPresence then GK.BroadcastPresence() end -- kanal
+            if GK.FullBroadcast then GK.FullBroadcast() end         -- GUILD: wypchnij swoj stan gildii
         end)
-        -- po zebraniu presence: wybierz JEDNO zrodlo i pociagnij od niego stan (szeptem)
+        -- po zebraniu presence: pull od zrodla z TEJ SAMEJ gildii (odpowiedz leci po GUILD)
         C_Timer.After(14, function()
             local src = GK.PickSyncSource and GK.PickSyncSource()
             if src and GK.Send then
@@ -257,6 +275,7 @@ f:SetScript("OnEvent", function(self, event, ...)
             end
         end)
         C_Timer.NewTicker(30, function()
+            if GK.JoinSyncChannel then GK.JoinSyncChannel() end     -- pilnuj obecnosci w kanale
             if GK.BroadcastMyKey then GK.BroadcastMyKey() end
             if GK.BroadcastPresence then GK.BroadcastPresence() end
         end)
@@ -278,6 +297,22 @@ f:SetScript("OnEvent", function(self, event, ...)
         if GK.ScanApplicants then GK.ScanApplicants() end
     elseif event == "WHO_LIST_UPDATE" then
         if GK.OnWhoListUpdate then GK.OnWhoListUpdate() end
+    elseif event == "CHAT_MSG_CHANNEL" then
+        -- presence + klucze po kanale (zwykly czat z prefiksem "GK~"); reszta czatu ignorowana
+        local text, sender = ...
+        if not text or text:sub(1, #GK.CHAN_PFX) ~= GK.CHAN_PFX then return end
+        if normalizeName(sender) == normalizeName(GetUnitFullName("player")) then return end
+        local parts = { strsplit(GK.CHAN_SEP, text:sub(#GK.CHAN_PFX + 1)) }
+        local typ = parts[1]
+        if typ == "H" then          -- presence: class, spec, admin, blocked, ver, guild
+            if GK.ReceivePresence then GK.ReceivePresence(sender, parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]) end
+            if KloceFrame and KloceFrame.mode == "party" then
+                if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+                if KloceFrame.RefreshList then KloceFrame.RefreshList() end
+            end
+        elseif typ == "K" then      -- klucz: dungeon, level
+            if GK.ReceiveKey then GK.ReceiveKey(sender, parts[2], tonumber(parts[3])) end
+        end
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, msg, channel, sender = ...
         if prefix ~= AddonPrefix then return end
@@ -292,38 +327,29 @@ f:SetScript("OnEvent", function(self, event, ...)
 			end
 			return
         end
-        if msg:sub(1, 4) == MSG_KEY then   -- "KEY:" — klucze M+ (zawsze przyjmowane, info-only)
-            if GK.ReceiveKey then GK.ReceiveKey(sender, msg:sub(5)) end
-            return
-        end
-        if msg:sub(1, 3) == MSG_HIQ then   -- "HI?" — ktos pyta kto online -> odpowiedz presence (z malym staggerem)
-            local d = 0.3 + (#tostring(sender) % 5) * 0.25
-            C_Timer.After(d, function() if GK.BroadcastPresence then GK.BroadcastPresence() end end)
-            return
-        end
-        if msg:sub(1, 3) == MSG_HI then    -- "HI:" — presence + klasa + spec (info-only, zasila cache)
-            if GK.ReceivePresence then GK.ReceivePresence(sender, msg:sub(4)) end
-            if KloceFrame and KloceFrame.mode == "party" then
-                if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
-                if KloceFrame.RefreshList then KloceFrame.RefreshList() end
-            end
-            return
-        end
-        if msg:sub(1, 5) == MSG_SYNC then   -- "SYNC?" — SKIEROWANA (szept) prosba: odpowiada tylko TEN, kogo poproszono
-            -- odpowiadamy po GUILD (separator \031 nie przechodzi pewnie przez WHISPER na Tauri).
-            -- Prosba byla szeptem, wiec i tak odpowiada tylko jedna osoba; reszta tego nie dostaje.
+        if msg:sub(1, 5) == MSG_SYNC then   -- "SYNC?" — pull W OBREBIE GILDII: odpowiadam pelnym stanem po GUILD
             if GK.FullBroadcast then GK.FullBroadcast(true) end
             return
         end
-        if msg:sub(1, 4) == MSG_FLAG then   -- "FLG:" — ustawienie flag admin/blocked (tylko zgodna wersja)
-            if (not GK.VersionOK or GK.VersionOK(sender)) and GK.ApplyFlag then GK.ApplyFlag(sender, msg:sub(5)) end
+        if msg:sub(1, 3) == MSG_BREQ then   -- "BRQ" — most cross-guild: Alvcard prosi o stan -> wysylam mu SZEPTEM
+            if GK.IsSuperAdmin and GK.IsSuperAdmin(sender) and GK.FullBroadcast then
+                GK.FullBroadcast(true, "WHISPER", sender)
+            end
+            return
+        end
+        if msg:sub(1, 3) == MSG_FSHARE then -- "FSH" — most: Alvcard kaze zrobic share w MOJEJ gildii
+            if GK.IsSuperAdmin and GK.IsSuperAdmin(sender) and GK.ShareAll then GK.ShareAll() end
+            return
+        end
+        if msg:sub(1, 4) == MSG_FLAG then   -- "FLG:" — ustawienie flag admin/blocked
+            if not (channel ~= "WHISPER" and GK.VersionBad and GK.VersionBad(sender)) and GK.ApplyFlag then GK.ApplyFlag(sender, msg:sub(5)) end
             return
         end
         -- Sync listy/detali/gildii â€” tylko gdy przyjmujesz zmiany od innych (kolko zebate).
-        -- Kazda wiadomosc niesie czas serwera; scalanie "nowsze wygrywa" (z nagrobkami) jest w ApplyRemote*.
         if not GigaKloceDB.acceptSync then return end
-        -- gate wersji: dane sync przyjmujemy TYLKO od tej samej wersji modelu (inaczej parsowanie sie rozjedzie)
-        if GK.VersionOK and not GK.VersionOK(sender) then return end
+        -- gate wersji: odrzucamy GUILD-dane tylko gdy wersja nadawcy ZNANA i INNA (nieznana = akceptuj,
+        -- bo presence z kanalu moze jeszcze nie dojsc, a format list jest stabilny). WHISPER (most) omija.
+        if channel ~= "WHISPER" and GK.VersionBad and GK.VersionBad(sender) then return end
         local function refreshDetailWin(name)
             if KloceDetailFrame and KloceDetailFrame:IsShown() and KloceDetailFrame.key == normalizeName(name) and KloceDetailFrame.RefreshAll then
                 KloceDetailFrame.RefreshAll()
