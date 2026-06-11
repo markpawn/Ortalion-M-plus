@@ -435,55 +435,14 @@ f:SetScript("OnEvent", function(self, event, ...)
 end)
 
 -- ============================
--- CONTEXT MENU (menu jednostki) — wzorzec BEZ TAINTU
+-- CONTEXT MENU — USUNIETE (taint)
 -- ============================
--- WAZNE: dodawanie przyciskow przez UIDropDownMenu_AddButton w hooku ShowMenu brudzi menu
--- i psuje bezpieczne pozycje Blizzarda (Set Focus/Target -> "forbidden function").
--- Dlatego rejestrujemy przyciski w UnitPopupButtons/UnitPopupMenus (tak jak sam UI),
--- a klik obslugujemy w UnitPopup_OnClick. Hook ShowMenu tylko LAPIE nick (bez AddButton).
-if UnitPopupButtons and UnitPopupMenus then
-    UnitPopupButtons["GIGAKLOCE_KLOCE"] = { text = "|cffff7d0aKloce: add/remove|r", dist = 0 }
-    UnitPopupButtons["GIGAKLOCE_GUILD"] = { text = "|cffffd200Block guild (/who)|r", dist = 0 }
-    UnitPopupButtons["GIGAKLOCE_CHAD"]  = { text = "|cff40ff40Chad: add/remove|r", dist = 0 }
-    local function ensureInMenu(m, b)
-        local list = UnitPopupMenus[m]
-        if not list then return end
-        for _, v in ipairs(list) do if v == b then return end end
-        table.insert(list, b)
-    end
-    for _, m in ipairs({ "PLAYER", "PARTY", "RAID_PLAYER", "FRIEND", "CHAT_ROSTER", "GUILD", "GUILD_OFFLINE" }) do
-        ensureInMenu(m, "GIGAKLOCE_KLOCE")
-        ensureInMenu(m, "GIGAKLOCE_GUILD")
-        ensureInMenu(m, "GIGAKLOCE_CHAD")
-    end
-end
-
--- Lapiemy kontekst (unit/nick) z ostatnio otwartego menu — TYLKO odczyt, bez AddButton (nie brudzi).
-local popupUnit, popupName, popupServer
-hooksecurefunc("UnitPopup_ShowMenu", function(dropdownMenu, which, unit, name, userData)
-    popupUnit, popupName = unit, name
-    popupServer = dropdownMenu and dropdownMenu.server
-end)
-
-hooksecurefunc("UnitPopup_OnClick", function(self)
-    local btn = self and self.value
-    if btn ~= "GIGAKLOCE_KLOCE" and btn ~= "GIGAKLOCE_GUILD" and btn ~= "GIGAKLOCE_CHAD" then return end
-    local name
-    if popupUnit and UnitExists(popupUnit) and UnitIsPlayer(popupUnit) then
-        name = GetUnitFullName(popupUnit)
-    elseif popupName and popupName ~= "" then
-        name = popupName .. ((popupServer and popupServer ~= "") and ("-" .. popupServer) or "")
-    end
-    if not name or name == "" then return end
-    if normalizeName(name) == normalizeName(GetUnitFullName("player")) then return end   -- nie siebie
-    if btn == "GIGAKLOCE_KLOCE" then
-        if has_value(gigakloce, name) then RemoveKloce(name) else AddKloce(name) end
-    elseif btn == "GIGAKLOCE_CHAD" then
-        if has_value(gigachad, name) then RemoveChad(name) else AddChad(name) end
-    elseif btn == "GIGAKLOCE_GUILD" then
-        if GK.WhoAddGuild then GK.WhoAddGuild(name) end
-    end
-end)
+-- Na 7.3.5 NIE DA SIE dodac pozycji do menu jednostki bez "taintu": kazda modyfikacja
+-- (AddButton w hooku ShowMenu ALBO wpis do UnitPopupButtons/UnitPopupMenus) brudzi menu,
+-- przez co bezpieczne pozycje Blizzarda (Set Focus/Target -> chronione FocusUnit) wywalaja
+-- "forbidden function". Czyste rozwiazanie pojawilo sie dopiero w 10.x (Menu.ModifyMenu).
+-- Dlatego rezygnujemy z menu jednostki. Dodawanie kloca/chada: /kloce add (target/nick),
+-- pole w oknie, albo lista "Online with addon". Blokada gildii: /kloce guild add albo /who recznie.
 
 -- ============================
 -- POPUP DIALOG
