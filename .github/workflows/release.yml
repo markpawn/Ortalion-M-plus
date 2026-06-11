@@ -47,11 +47,13 @@ jobs:
           echo "=== zawartosc paczki ==="
           unzip -l GigaKloce.zip
 
+      # Artefakt: wrzucamy FOLDER (nie gotowy zip!), bo GitHub i tak pakuje artefakt w zip.
+      # path=build (zawiera tylko GigaKloce/) -> pobrany artefakt to jeden zip z GigaKloce/ w srodku.
       - name: Upload artifact (zawsze)
         uses: actions/upload-artifact@v4
         with:
           name: GigaKloce
-          path: GigaKloce.zip
+          path: build/
 
       - name: Create release (tylko dla tagow)
         if: startsWith(github.ref, 'refs/tags/')
