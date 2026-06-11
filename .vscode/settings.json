@@ -49,6 +49,7 @@
         "PlayerFrame",
         "TargetFrame",
         "FocusFrame",
-        "CloseDropDownMenus"
+        "CloseDropDownMenus",
+        "UNKNOWN"
     ]
 }

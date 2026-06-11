@@ -216,19 +216,25 @@ local PLAYEDWITH_CAP = 300
 local function recordOne(unit)
     if not (UnitExists(unit) and UnitIsPlayer(unit)) then return end
     if UnitIsUnit(unit, "player") then return end
-    local name = GetUnitFullName(unit)
-    if not name or name == "" then return end
-    local key = normalizeName(name)
+    local full = GetUnitFullName(unit)
+    if not full or full == "" then return end
+    -- Tauri zwraca czasem CZASTKOWE/niezaladowane odczyty dla swiezych czlonkow grupy:
+    -- "Yiik-" (realm jeszcze nie doszedl) albo "Unknown-Evermoon". Odrzuc je, inaczej ta sama
+    -- osoba trafia pod dwa klucze (raz wlasny realm, raz docelowy) -> duplikaty na liscie.
+    local namePart = strsplit("-", full, 2)
+    if not namePart or namePart == "" or namePart == UNKNOWN then return end
+    if full:sub(-1) == "-" then return end
+    local key = normalizeName(full)
     if key == "" then return end
     local _, classFile = UnitClass(unit)
-    local _, spec = GK.DetectClassSpec(name)   -- spec tylko jesli dane inspectu sa w cache; inaczej nil
+    local _, spec = GK.DetectClassSpec(full)   -- spec tylko jesli dane inspectu sa w cache; inaczej nil
     local rec = GK.playedWith[key] or {}
-    rec.name = name
+    rec.name = displayName(full)               -- spojnie z listami: chowa wlasny realm, pokazuje obcy
     if classFile and classFile ~= "" then rec.class = classFile end
     if spec and spec ~= "" then rec.spec = spec end
     rec.t = GK.now()
     GK.playedWith[key] = rec
-    if (not rec.spec or rec.spec == "") and GK.RequestSpec then GK.RequestSpec(name) end  -- dociagnij spec na pozniej
+    if (not rec.spec or rec.spec == "") and GK.RequestSpec then GK.RequestSpec(full) end  -- dociagnij spec na pozniej
 end
 
 -- przytnij do CAP najnowszych (po czasie)
