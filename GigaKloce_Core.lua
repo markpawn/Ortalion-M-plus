@@ -28,6 +28,7 @@ GK.CHAN_SEP = "~"              -- separator pol (drukowalny; czat tnie znaki nie
 GK.guildKeys = {}     -- ulotne: [normalizeName] = {name, dungeon, level, t}
 GK.addonUsers = {}    -- ulotne: [normalizeName] = {name, class, spec, t} (kto ma addon, online TERAZ)
 GK.userCache = {}     -- TRWALY cache: [normalizeName] = {name, class, spec, t} (z presence; do presetow/list)
+GK.playedWith = {}    -- ULOTNE: [normalizeName] = {name, class, spec, t} (ludzie z party/raid; podpowiedzi w Add) — NIE zapisywane
 
 GK.KLOCE_TAGS = { "noob", "leaver", "debil", "ninja" }
 GK.DEFAULT_TAG = "noob"
@@ -85,6 +86,9 @@ function GK.InitSaved()
     GigaKloceDB.userCache = GigaKloceDB.userCache or {}
     wipe(GK.userCache); for k, v in pairs(GigaKloceDB.userCache) do GK.userCache[k] = v end
     GigaKloceDB.userCache = GK.userCache
+    -- "last played with" jest ULOTNE (tylko GK.playedWith w pamieci) — nie zapisujemy go do DB.
+    -- Usun ewentualny wpis z wczesniejszych testow, zeby nie smiecil w SavedVariables.
+    GigaKloceDB.playedWith = nil
     -- lista blokowanych gildii (auto-kloc przy aplikacji do premade)
     GigaKloceDB.blockedGuilds = GigaKloceDB.blockedGuilds or {}
     -- preferowane zrodlo sync (opcjonalne): nick, od ktorego joiner woli ciagnac stan. nil = auto.

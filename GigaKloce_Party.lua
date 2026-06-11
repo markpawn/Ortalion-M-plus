@@ -209,6 +209,68 @@ function GK.OnInspectReady(guid)
     end
 end
 
+-- ===== "Last played with" (zrodlo podpowiedzi w polu Add) =====
+local PLAYEDWITH_CAP = 300
+
+-- Zapisz/odswiez jednego czlonka grupy w playedWith (klasa pewna; spec best-effort).
+local function recordOne(unit)
+    if not (UnitExists(unit) and UnitIsPlayer(unit)) then return end
+    if UnitIsUnit(unit, "player") then return end
+    local name = GetUnitFullName(unit)
+    if not name or name == "" then return end
+    local key = normalizeName(name)
+    if key == "" then return end
+    local _, classFile = UnitClass(unit)
+    local _, spec = GK.DetectClassSpec(name)   -- spec tylko jesli dane inspectu sa w cache; inaczej nil
+    local rec = GK.playedWith[key] or {}
+    rec.name = name
+    if classFile and classFile ~= "" then rec.class = classFile end
+    if spec and spec ~= "" then rec.spec = spec end
+    rec.t = GK.now()
+    GK.playedWith[key] = rec
+    if (not rec.spec or rec.spec == "") and GK.RequestSpec then GK.RequestSpec(name) end  -- dociagnij spec na pozniej
+end
+
+-- przytnij do CAP najnowszych (po czasie)
+local function prunePlayedWith()
+    local n = 0
+    for _ in pairs(GK.playedWith) do n = n + 1 end
+    if n <= PLAYEDWITH_CAP then return end
+    local arr = {}
+    for k, v in pairs(GK.playedWith) do arr[#arr + 1] = { k = k, t = v.t or 0 } end
+    table.sort(arr, function(a, b) return a.t > b.t end)
+    for i = PLAYEDWITH_CAP + 1, #arr do GK.playedWith[arr[i].k] = nil end
+end
+
+-- Zapisz caly aktualny sklad party/raid (wolane z GROUP_ROSTER_UPDATE i na logowaniu).
+function GK.RecordPlayedWith()
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do recordOne("raid" .. i) end
+    elseif IsInGroup() then
+        for i = 1, GetNumSubgroupMembers() do recordOne("party" .. i) end
+    else
+        return
+    end
+    prunePlayedWith()
+end
+
+-- Podpowiedzi do pola Add: dopasowania (pod)tekstem, posortowane "ostatnio grane".
+-- Zwraca liste rekordow {name, class, spec, t}. Pusty query -> najswiezsze.
+function GK.PlayedWithMatches(query, max)
+    max = max or 8
+    query = (query or ""):lower()
+    local out = {}
+    for key, rec in pairs(GK.playedWith) do
+        local hay = (rec.name or key):lower()
+        if query == "" or hay:find(query, 1, true) then
+            out[#out + 1] = rec
+        end
+    end
+    table.sort(out, function(a, b) return (a.t or 0) > (b.t or 0) end)
+    while #out > max do table.remove(out) end
+    return out
+end
+
 -- ===== Flagi admin/blocked =====
 -- Admin wysyla ustawienie flag dla gracza (GUILD; cel + ewentualnie reszta aktualizuja cache/widok).
 function GK.SetUserFlags(targetName, admin, blocked)
