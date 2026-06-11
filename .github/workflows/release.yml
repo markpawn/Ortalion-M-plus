@@ -1,6 +1,7 @@
 name: Release addon
 
-# Buduje paczke GigaKloce.zip (folder GigaKloce/ w srodku) z plikow wymienionych w .toc.
+# Buduje paczke GigaKloce.zip (folder GigaKloce/ w srodku) ze WSZYSTKICH sledzonych plikow
+# (toc + lua + assets/ + wipe.ogg ...) oprocz meta-plikow repo (README/TODO/.github/.vscode/.gitignore).
 # Trigger: push taga vX.Y  ->  GitHub Release z zalaczonym zipem.
 #          recznie (workflow_dispatch) -> zip jako artifact w zakladce Actions.
 
@@ -19,27 +20,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build GigaKloce package from .toc
+      - name: Build GigaKloce package
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#v}"
           echo "ref=${GITHUB_REF_NAME}  version=${VERSION}"
           rm -rf build
           mkdir -p build/GigaKloce
-          cp GigaKloce.toc build/GigaKloce/
-          # skopiuj kazdy plik wymieniony w .toc (pomija ## metadane i puste linie)
-          while IFS= read -r line || [ -n "$line" ]; do
-            line="${line%$'\r'}"
-            case "$line" in ''|\#*) continue ;; esac
-            if [ -f "$line" ]; then
-              mkdir -p "build/GigaKloce/$(dirname "$line")"
-              cp "$line" "build/GigaKloce/$line"
-              echo "  + $line"
-            else
-              echo "  ! BRAK pliku z .toc: $line" >&2
-              exit 1
-            fi
-          done < GigaKloce.toc
+          # wez WSZYSTKIE sledzone pliki oprocz meta-plikow repo; zachowaj strukture katalogow
+          git ls-files | while IFS= read -r f; do
+            case "$f" in
+              .github/*|.vscode/*|.gitignore|README.md|TODO.md) continue ;;
+            esac
+            mkdir -p "build/GigaKloce/$(dirname "$f")"
+            cp "$f" "build/GigaKloce/$f"
+            echo "  + $f"
+          done
           # podbij Version w .toc z taga (tylko gdy tag zaczyna sie od v)
           if [ "${VERSION}" != "${GITHUB_REF_NAME}" ]; then
             sed -i "s/^## Version:.*/## Version: ${VERSION}\r/" build/GigaKloce/GigaKloce.toc
