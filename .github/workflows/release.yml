@@ -30,7 +30,7 @@ jobs:
           # wez WSZYSTKIE sledzone pliki oprocz meta-plikow repo; zachowaj strukture katalogow
           git ls-files | while IFS= read -r f; do
             case "$f" in
-              .github/*|.vscode/*|.gitignore|README.md|TODO.md) continue ;;
+              .github/*|.vscode/*|.gitignore|README.md|TODO.md|RELEASE_NOTES.md) continue ;;
             esac
             mkdir -p "build/GigaKloce/$(dirname "$f")"
             cp "$f" "build/GigaKloce/$f"
@@ -60,4 +60,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: GigaKloce.zip
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md       # opis Release = kuratorowane notki
+          generate_release_notes: true      # + auto-lista commitow pod spodem
