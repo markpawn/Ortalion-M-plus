@@ -435,14 +435,66 @@ f:SetScript("OnEvent", function(self, event, ...)
 end)
 
 -- ============================
--- CONTEXT MENU — USUNIETE (taint)
+-- CONTEXT MENU (wlasne) — Alt + lewy klik na jednostce
 -- ============================
--- Na 7.3.5 NIE DA SIE dodac pozycji do menu jednostki bez "taintu": kazda modyfikacja
--- (AddButton w hooku ShowMenu ALBO wpis do UnitPopupButtons/UnitPopupMenus) brudzi menu,
--- przez co bezpieczne pozycje Blizzarda (Set Focus/Target -> chronione FocusUnit) wywalaja
--- "forbidden function". Czyste rozwiazanie pojawilo sie dopiero w 10.x (Menu.ModifyMenu).
--- Dlatego rezygnujemy z menu jednostki. Dodawanie kloca/chada: /kloce add (target/nick),
--- pole w oknie, albo lista "Online with addon". Blokada gildii: /kloce guild add albo /who recznie.
+-- Alt+LEWY klik nie wywoluje menu Blizzarda (to prawy klik), wiec zadnego dublowania.
+-- NIE dotykamy menu Blizzarda (UnitPopup) -> zaden taint nie psuje Set Focus/Target.
+-- Otwieramy WLASNY dropdown (osobna ramka) przez EasyMenu.
+local gkUnitMenuFrame = CreateFrame("Frame", "GigaKloceUnitMenu", UIParent, "UIDropDownMenuTemplate")
+
+local function GK_OpenMenuForName(name)
+    if not name then return end
+    local onKloce = has_value(gigakloce, name)
+    local onChad = has_value(gigachad, name)
+    local menu = {
+        { text = name, isTitle = true, notCheckable = true },
+        { text = onKloce and "|cffff5555Remove from Kloce|r" or "|cffff7d0aAdd to Kloce|r",
+          notCheckable = true,
+          func = function() if onKloce then RemoveKloce(name) else AddKloce(name) end end },
+        { text = "|cffffd200Block guild (/who)|r",
+          notCheckable = true,
+          func = function() if GK.WhoAddGuild then GK.WhoAddGuild(name) end end },
+        { text = onChad and "|cff55ddffRemove from Chads|r" or "|cff40ff40Add to Chads|r",
+          notCheckable = true,
+          func = function() if onChad then RemoveChad(name) else AddChad(name) end end },
+        { text = "Cancel", notCheckable = true, func = function() end },
+    }
+    CloseDropDownMenus()           -- zamknij ewentualne menu Blizzarda, zeby zostalo tylko nasze
+    EasyMenu(menu, gkUnitMenuFrame, "cursor", 0, 0, "MENU")
+end
+GK.OpenUnitMenu = GK_OpenMenuForName
+
+local function GK_TriggerForUnit(unit)
+    if not (unit and UnitExists(unit) and UnitIsPlayer(unit)) then return end
+    if UnitIsUnit(unit, "player") then return end   -- nie na sobie
+    local name = GetUnitFullName(unit)
+    if not name then return end
+    -- defer o klatke: nasze menu otwiera sie PO menu Blizzarda, wiec je nadpisuje
+    C_Timer.After(0, function() GK_OpenMenuForName(name) end)
+end
+
+-- Swiat / nameplate'y: Alt + lewy klik na jednostce pod kursorem
+WorldFrame:HookScript("OnMouseUp", function(self, button)
+    if button == "LeftButton" and IsAltKeyDown() then
+        GK_TriggerForUnit("mouseover")
+    end
+end)
+
+-- Standardowe ramki jednostek: Alt + lewy klik
+local function GK_HookUnitFrame(frame, unit)
+    if not frame then return end
+    frame:HookScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and IsAltKeyDown() then
+            GK_TriggerForUnit(self.unit or unit)
+        end
+    end)
+end
+GK_HookUnitFrame(PlayerFrame, "player")
+GK_HookUnitFrame(TargetFrame, "target")
+GK_HookUnitFrame(FocusFrame, "focus")
+for i = 1, 4 do
+    GK_HookUnitFrame(_G["PartyMemberFrame"..i], "party"..i)
+end
 
 -- ============================
 -- POPUP DIALOG
