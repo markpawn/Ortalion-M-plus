@@ -265,6 +265,7 @@ f:SetScript("OnEvent", function(self, event, ...)
             if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- kanal
             if GK.BroadcastPresence then GK.BroadcastPresence() end -- kanal
             if GK.FullBroadcast then GK.FullBroadcast() end         -- GUILD: wypchnij swoj stan gildii
+            if GK.RecordPlayedWith then GK.RecordPlayedWith() end   -- jesli logujesz sie juz w grupie
         end)
         -- po zebraniu presence: pull od zrodla z TEJ SAMEJ gildii (odpowiedz leci po GUILD)
         C_Timer.After(14, function()
@@ -431,6 +432,8 @@ f:SetScript("OnEvent", function(self, event, ...)
 
         -- Detekcja klocow w skladzie (alert + popup + ikonka + lista In Group).
 		DetectKloceInGroup()
+		-- Zapamietaj sklad do "last played with" (podpowiedzi w polu Add).
+		if GK.RecordPlayedWith then GK.RecordPlayedWith() end
 	end
 end)
 

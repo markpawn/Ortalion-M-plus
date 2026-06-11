@@ -185,6 +185,25 @@ local function AddChad(name, silent, by)
     return ok
 end
 
+-- Dodanie z podpowiedzi "played with": dodaj wg trybu i nanies klase/spec (z rekordu lub live/cache).
+function GK.AddPlayedWith(name, isChad, class, spec)
+    if not name or name == "" then return end
+    if isChad then AddChad(name) else AddKloce(name) end
+    local info = gigakloceInfo[normalizeName(name)]
+    if info then
+        class = (class and class ~= "" and class) or (GK.ClassOf and GK.ClassOf(name)) or nil
+        spec  = (spec  and spec  ~= "" and spec ) or (GK.SpecOf  and GK.SpecOf(name))  or nil
+        local changed = false
+        if class and class ~= "" and info.class ~= class then info.class = class; changed = true end
+        if spec  and spec  ~= "" and info.spec  ~= spec  then info.spec  = spec;  changed = true end
+        if changed then
+            info.t = GK.now()
+            if isChad then BroadcastChadDetails(name) else BroadcastKloceDetails(name) end
+        end
+    end
+    if RefreshUI then RefreshUI() end
+end
+
 -- ===== Zastosowanie zdalnych zmian (LWW; BEZ rozsylania dalej) =====
 function GK.ApplyRemoteKloce(name, ts, tag, note, added, by, class, spec)
     if not isClean(name) then return false end

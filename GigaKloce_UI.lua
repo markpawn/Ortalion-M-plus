@@ -1146,6 +1146,69 @@ local function CreateKloceUI()
     addBtn:SetScript("OnClick", DoAdd)
     editBox:SetScript("OnEnterPressed", function(self) DoAdd(); self:ClearFocus() end)
 
+    -- ===== Podpowiedzi "last played with" pod polem Add =====
+    local SUG_MAX, SUG_ROWH = 8, 18
+    local sugFrame = CreateFrame("Frame", "GigaKloceAddSuggest", KloceFrame)
+    sugFrame:SetFrameStrata("DIALOG")
+    sugFrame:SetPoint("TOPLEFT", editBox, "BOTTOMLEFT", 0, -2)
+    sugFrame:SetPoint("TOPRIGHT", editBox, "BOTTOMRIGHT", 0, -2)
+    sugFrame:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    sugFrame:SetBackdropColor(0, 0, 0, 0.92)
+    sugFrame:Hide()
+    sugFrame.rows = {}
+    for i = 1, SUG_MAX do
+        local b = CreateFrame("Button", nil, sugFrame)
+        b:SetHeight(SUG_ROWH)
+        b:SetPoint("TOPLEFT", 4, -4 - (i - 1) * SUG_ROWH)
+        b:SetPoint("TOPRIGHT", -4, -4 - (i - 1) * SUG_ROWH)
+        b.hl = b:CreateTexture(nil, "HIGHLIGHT"); b.hl:SetAllPoints(); b.hl:SetColorTexture(1, 1, 1, 0.12)
+        b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        b.text:SetPoint("LEFT", 4, 0); b.text:SetJustifyH("LEFT")
+        b:SetScript("OnClick", function(self)
+            local rec = self.rec
+            if rec and GK.AddPlayedWith then
+                GK.AddPlayedWith(rec.name, KloceFrame.mode == "chad", rec.class, rec.spec)
+            end
+            editBox:SetText("")
+            sugFrame:Hide()
+            editBox:ClearFocus()
+        end)
+        sugFrame.rows[i] = b
+    end
+
+    local function UpdateSuggestions()
+        if (KloceFrame.mode ~= "kloce" and KloceFrame.mode ~= "chad") or not editBox:HasFocus() then
+            sugFrame:Hide(); return
+        end
+        local matches = (GK.PlayedWithMatches and GK.PlayedWithMatches(editBox:GetText(), SUG_MAX)) or {}
+        if #matches == 0 then sugFrame:Hide(); return end
+        for i, b in ipairs(sugFrame.rows) do
+            local rec = matches[i]
+            if rec then
+                b.rec = rec
+                local cc = rec.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[rec.class]
+                local nm = (cc and cc.colorStr) and ("|c" .. cc.colorStr .. rec.name .. "|r") or rec.name
+                b.text:SetText(nm)
+                b:Show()
+            else
+                b.rec = nil; b:Hide()
+            end
+        end
+        sugFrame:SetHeight(8 + math.min(#matches, SUG_MAX) * SUG_ROWH)
+        sugFrame:Show()
+    end
+
+    editBox:HookScript("OnTextChanged", function(_, userInput) if userInput then UpdateSuggestions() end end)
+    editBox:HookScript("OnEditFocusGained", function() UpdateSuggestions() end)
+    editBox:HookScript("OnEditFocusLost", function()
+        C_Timer.After(0.18, function() if not editBox:HasFocus() then sugFrame:Hide() end end)
+    end)
+
     -- ===== Dolny pasek: Share + Reparty =====
     local shareBtn = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
     shareBtn:SetSize(96, 22)
