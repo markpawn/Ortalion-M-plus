@@ -4,23 +4,20 @@
   GitHub doklei pod spodem auto-liste commitow (generate_release_notes).
 -->
 
-# 🛡️ Ortalion M+ — `v3.x`
+# 🛡️ Ortalion M+ — `v4`
 
 Addon do organizacji **Mythic+** (WoW 7.3.5, Tauri). Pełna instrukcja: **[README](README.md)**.
 
-## ✨ Co nowego (linia v3)
-- 🌍 **Cross-guild** — presence i klucze widać między gildiami (po ukrytym kanale czatu), listy dalej po kanale gildii, most pełnego stanu szeptem (super-admin).
-- 🔑 **Keys** — grupowanie po gildii (Z→A, „No Guild" na końcu), skład na górze, **ilvl**, gildiowa **notatka publiczna**, prawy klik → **Invite / Whisper**.
-- ⌨️ **Podpowiedzi w polu Add** — ostatnio grani razem (party/raid), pokolorowani wg klasy; klik = od razu wpis z ustawioną klasą i specem.
-- 🖱️ **Menu na graczu = Alt + lewy klik** (własne menu, bez „taintu" psującego Set Focus). Zwykły prawy klik = czyste menu Blizzarda.
-- 🧬 **`DATA_VERSION = 3`** — sync tylko między zgodnymi wersjami (chroni przed rozjechaniem danych).
+## ✨ Co nowego (v4)
+- 📣 **Guild-announce bridge** — admin wybiera osobę z innej gildii (prawy klik na liście „Online with addon" → **Announce to their guild…**, albo `/kloce announce <nick> <treść>`) i jej klient wrzuca treść na **czat jej gildii** (z prefiksem `[via Nick]`). Auto-relay; odbiorca weryfikuje, że nadawca to admin.
+- 🔗 **Linki w ogłoszeniach** — możesz **shift-klik** wkleić item/czar/quest itp.; u odbiorcy wychodzi klikalny link.
+- 🛠️ **Fix: nadawanie admin/blocked cross-guild** — flagi lecą teraz **szeptem do celu** (wcześniej tylko po kanale gildii, więc nie działały między gildiami).
 
-## 🛠️ Poprawki
-- Paczka zawiera komplet plików: `assets/` (ikony) + `wipe.ogg`.
-- Koniec z „zip w zipie" przy pobieraniu artefaktu.
+## ✨ Z linii v3 (przypomnienie)
+- 🌍 Cross-guild presence/klucze, 🔑 Keys (grupowanie po gildii, ilvl, notatka), ⌨️ podpowiedzi „played with", 🖱️ menu na graczu = **Alt + lewy klik**.
 
-## ⚠️ Ważne
-Po update **cała ekipa robi `/reload` razem** — v3 nie synchronizuje się z wcześniejszymi wersjami.
+## 🧬 `DATA_VERSION = 4`
+Sync tylko między zgodnymi wersjami. **Cała ekipa robi `/reload` razem** — v4 nie synchronizuje się z v3/wcześniejszymi.
 
 ## 📥 Instalacja
 Rozpakuj `GigaKloce.zip` do `Interface/AddOns` (w środku jest folder `GigaKloce`) i **przeloguj się** (po pierwszej instalacji sam `/reload` nie wystarczy).

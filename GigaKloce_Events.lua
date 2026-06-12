@@ -8,6 +8,7 @@ local MSG_GADD, MSG_GREM = GK.MSG_GADD, GK.MSG_GREM
 local MSG_SYNC = GK.MSG_SYNC
 local MSG_FLAG = GK.MSG_FLAG
 local MSG_BREQ, MSG_FSHARE = GK.MSG_BREQ, GK.MSG_FSHARE
+local MSG_GANN = GK.MSG_GANN
 local reparty, repartyLeader, repartyType, repartyStage = {}, nil, nil, nil
 
 -- ============================
@@ -182,8 +183,14 @@ SlashCmdList["KLOCE"] = function(msg)
             log("Bridge: kazalem " .. name .. " zrobic share w jego gildii.")
         end
 
+    elseif cmd == "announce" then
+        -- cross-guild ogloszenie: admin -> odbiorca wrzuca tresc na czat SWOJEJ gildii
+        local target, text = rest:match("^(%S+)%s+(.+)$")
+        if not target then log("Usage: /kloce announce <nick> <tresc>"); return end
+        if GK.SendGuildAnnounce then GK.SendGuildAnnounce(target, text) end
+
     else
-        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild | bridge (Alvcard): pull/push/forceshare <nick> | chads: /chad")
+        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild | announce <nick> <tresc> (admin) | bridge (Alvcard): pull/push/forceshare <nick> | chads: /chad")
     end
 end
 
@@ -344,6 +351,19 @@ f:SetScript("OnEvent", function(self, event, ...)
         end
         if msg:sub(1, 4) == MSG_FLAG then   -- "FLG:" — ustawienie flag admin/blocked
             if not (channel ~= "WHISPER" and GK.VersionBad and GK.VersionBad(sender)) and GK.ApplyFlag then GK.ApplyFlag(sender, msg:sub(5)) end
+            return
+        end
+        if msg:sub(1, 4) == MSG_GANN then   -- "GAN:" — most ogloszen: admin kazal wrzucic tresc na czat MOJEJ gildii
+            local text = msg:sub(5)
+            local su = GK.addonUsers[normalizeName(sender)]
+            local senderAdmin = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
+            -- tylko szept, nadawca zweryfikowany jako admin (z presence), ja w gildii, tresc niepusta
+            if channel == "WHISPER" and senderAdmin and text ~= "" and IsInGuild() then
+                local line = "[via " .. displayName(sender) .. "] " .. text
+                if #line > 255 then line = line:sub(1, 255) end
+                SendChatMessage(line, "GUILD")
+                log("Guild-announce od " .. displayName(sender) .. " wrzucony na czat gildii.")
+            end
             return
         end
         -- Sync listy/detali/gildii â€” tylko gdy przyjmujesz zmiany od innych (kolko zebate).
@@ -536,6 +556,32 @@ StaticPopupDialogs["GIGAKLOCE_IMPORT"] = {
     hideOnEscape = true,
     preferredIndex = 3,
 }
+
+StaticPopupDialogs["GIGAKLOCE_ANNOUNCE"] = {
+    text = "Guild-announce do %s\n(wrzuci na czat jego gildii; mozesz shift-klik wkleic link):",
+    button1 = "Send",
+    button2 = "Cancel",
+    hasEditBox = true,
+    maxLetters = 230,
+    editBoxWidth = 320,
+    OnShow = function(self) GK.announceEditBox = self.editBox end,
+    OnHide = function(self) if GK.announceEditBox == self.editBox then GK.announceEditBox = nil end end,
+    OnAccept = function(self, data)
+        if GK.SendGuildAnnounce then GK.SendGuildAnnounce(data, self.editBox:GetText()) end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local parent = self:GetParent()
+        if GK.SendGuildAnnounce then GK.SendGuildAnnounce(parent.data, self:GetText()) end
+        parent:Hide()
+    end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+-- shift-klik na przedmiocie/czarze wkleja link do pola ogloszenia (gdy popup ma fokus)
+hooksecurefunc("ChatEdit_InsertLink", function(link)
+    local eb = GK.announceEditBox
+    if link and eb and eb:IsShown() and eb:HasFocus() then eb:Insert(link) end
+end)
 
 StaticPopupDialogs["GIGAKLOCE_NEWPRESET"] = {
     text = "New party preset name:",

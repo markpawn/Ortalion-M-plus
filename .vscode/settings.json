@@ -50,6 +50,10 @@
         "TargetFrame",
         "FocusFrame",
         "CloseDropDownMenus",
-        "UNKNOWN"
-    ]
+        "UNKNOWN",
+        "SendAddonMessage",
+        "RegisterAddonMessagePrefix",
+        "GuildRoster"
+    ],
+    "Lua.type.weakUnionCheck": true
 }

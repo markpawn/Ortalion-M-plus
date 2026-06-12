@@ -282,7 +282,9 @@ end
 function GK.SetUserFlags(targetName, admin, blocked)
     if not targetName or targetName == "" then return end
     local nm = (GK.canonicalDisplay and GK.canonicalDisplay(targetName)) or targetName
-    GK.Send(MSG_FLAG .. nm .. PRES_SEP .. (admin and "1" or "0") .. PRES_SEP .. (blocked and "1" or "0"))
+    -- SZEPT do celu (dziala cross-guild/realm; GUILD docieralo tylko do wlasnej gildii).
+    -- Cel ustawia sobie flage i rozglasza presence -> wszyscy (tez inne gildie) widza zmiane.
+    GK.Send(MSG_FLAG .. nm .. PRES_SEP .. (admin and "1" or "0") .. PRES_SEP .. (blocked and "1" or "0"), "WHISPER", nm)
 end
 
 -- Odbior FLG: ustaw flagi wg uprawnien nadawcy (admin nadaje tylko super; blocked nadaje kazdy admin).
@@ -307,6 +309,20 @@ function GK.ApplyFlag(sender, payload)
         if GK.BroadcastPresence then GK.BroadcastPresence() end
     end
     if KloceFrame and KloceFrame.mode == "party" and KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+end
+
+-- ===== Guild-announce bridge =====
+-- Admin wysyla osobie z INNEJ gildii tresc; jej klient wrzuci ja na czat SWOJEJ gildii (z prefiksem [via Nick]).
+function GK.SendGuildAnnounce(target, text)
+    if not (GK.AmIAdmin and GK.AmIAdmin()) then GK.out("Tylko admin moze wysylac ogloszenia cross-guild."); return false end
+    if not target or target == "" then GK.out("Podaj odbiorce ogloszenia."); return false end
+    text = (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+    if text == "" then GK.out("Pusta tresc ogloszenia."); return false end
+    if #text > 230 then text = text:sub(1, 230) end   -- zostaw miejsce na "[via Nick-Realm] " (limit czatu gildii 255)
+    local to = (GK.canonicalDisplay and GK.canonicalDisplay(target)) or target
+    GK.Send(GK.MSG_GANN .. text, "WHISPER", to)
+    GK.out("Ogloszenie wyslane do " .. displayName(to) .. " (wrzuci na czat swojej gildii).")
+    return true
 end
 
 -- Joiner wybiera ZRODLO sync: preferowane (GigaKloceDB.syncSource) jesli online,
