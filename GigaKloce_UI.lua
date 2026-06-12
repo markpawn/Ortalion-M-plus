@@ -967,9 +967,11 @@ local function CreateKloceUI()
                 row.text:SetText(oicon .. displayName(u.name) .. gstr .. vstr .. flags)
                 local cc = u.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[u.class]
                 if cc then row.text:SetTextColor(cc.r, cc.g, cc.b) else row.text:SetTextColor(0.8, 0.9, 1) end
-                -- klik (tylko admin): menu nadawania flag admin/blocked
+                -- PRAWY klik (tylko admin): menu kontekstowe — flagi admin/blocked, announce, most
                 if amAdmin then
-                    row:SetScript("OnClick", function()
+                    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                    row:SetScript("OnClick", function(_, button)
+                        if button ~= "RightButton" then return end
                         local iAmSuper = GK.IsSuperAdmin and GK.IsSuperAdmin(UnitName("player"))
                         local menu = { { text = displayName(u.name), isTitle = true, notCheckable = true } }
                         if iAmSuper then
@@ -980,6 +982,11 @@ local function CreateKloceUI()
                         menu[#menu + 1] = { text = "Blocked", isNotRadio = true, keepShownOnClick = false,
                             checked = function() return u.blocked end,
                             func = function() if GK.SetUserFlags then GK.SetUserFlags(u.name, u.admin, not u.blocked) end end }
+                        do   -- guild-announce: kazdy admin moze wyslac ogloszenie na czat gildii odbiorcy
+                            local who = u.name
+                            menu[#menu + 1] = { text = "|cff66ccffAnnounce to their guild...|r", notCheckable = true,
+                                func = function() StaticPopup_Show("GIGAKLOCE_ANNOUNCE", displayName(who), nil, who) end }
+                        end
                         if iAmSuper then   -- MOST cross-guild (tylko Alvcard)
                             local who = u.name
                             menu[#menu + 1] = { text = "|cffffd200Pull sync (cross-guild)|r", notCheckable = true,

@@ -8,7 +8,8 @@ GK.AddonPrefix = "GIGA_KLOCE"
 -- WAZNE: kazda zmiana formatu wiadomosci albo struktury danych MUSI podbic ten numer.
 -- v3: presence+klucze przez wlasny kanal czatu (cross-guild); listy sync nadal po GUILD;
 --     most cross-guild (Alvcard) po WHISPER.
-GK.DATA_VERSION = 3
+-- v4: guild-announce bridge (admin -> WHISPER GAN -> klient odbiorcy wrzuca na czat swojej gildii).
+GK.DATA_VERSION = 4
 -- Prefiksy wiadomosci sync po ADDON (GUILD/WHISPER), separator \031: K=kloce, C=chad; +=add, -=remove.
 GK.MSG_KADD, GK.MSG_KREM = "K+:", "K-:"
 GK.MSG_CADD, GK.MSG_CREM = "C+:", "C-:"
@@ -17,6 +18,7 @@ GK.MSG_SYNC = "SYNC?" -- skierowana (WHISPER) prosba o pelny stan (pull w obrebi
 GK.MSG_FLAG = "FLG:"  -- ustawienie flag admin/blocked dla gracza (przez admina)
 GK.MSG_BREQ = "BRQ"   -- most cross-guild: prosba o stan (WHISPER, tylko Alvcard)
 GK.MSG_FSHARE = "FSH" -- most cross-guild: "zrob share w swojej gildii" (WHISPER, tylko Alvcard)
+GK.MSG_GANN = "GAN:"  -- guild-announce bridge: admin -> WHISPER -> odbiorca wrzuca tresc na czat SWOJEJ gildii
 GK.SUPER_ADMIN = "alvcard"   -- super admin (nazwa bez realmu, lowercase): zawsze admin, nigdy blocked
 
 -- ===== Kanal czatu: presence + klucze (cross-guild). Addon-msg po kanale nie dziala na Tauri,
