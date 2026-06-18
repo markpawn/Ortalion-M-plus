@@ -1009,12 +1009,18 @@ local function CreateKloceUI()
                     row.text:SetTextColor(1, 0.82, 0)
                 else
                     local cls = GK.ClassOf and GK.ClassOf(it.name)
-                    local nameStr = classIcon(cls) .. classNameStr(displayName(it.name), cls)
+                    local sp = GK.SpecOf and GK.SpecOf(it.name)
+                    local icon = specIconStr(cls, sp)   -- ikona speca (gdy znany), inaczej ikona klasy
+                    if icon == "" then icon = classIcon(cls) end
+                    local nameStr = icon .. classNameStr(displayName(it.name), cls)
+                    -- ilvl + notatka to atrybuty GRACZA (z presence) -> pokazujemy dla KAZDEGO, tez bez klucza
+                    local il = GK.IlvlOf and GK.IlvlOf(it.name)
+                    local ilvlStr = (il and il > 0) and ("  |cff9d9d9d" .. il .. " ilvl|r") or ""
+                    local nt = GK.NoteOf and GK.NoteOf(it.name)
+                    local noteStr = (nt and nt ~= "") and ("  |cff6688aa" .. nt .. "|r") or ""
                     if it.noKey then
-                        row.text:SetText("  " .. nameStr)
+                        row.text:SetText("  " .. nameStr .. ilvlStr .. noteStr)
                     else
-                        local ilvlStr = (it.ilvl and it.ilvl > 0) and ("  |cff9d9d9d" .. it.ilvl .. " ilvl|r") or ""
-                        local noteStr = (it.note and it.note ~= "") and ("  |cff6688aa" .. it.note .. "|r") or ""
                         row.text:SetText("  " .. nameStr .. ilvlStr
                             .. "  |cff888888—|r  " .. (it.dungeon or "?") .. "   " .. keyLvlStr(it.level) .. noteStr)
                     end
@@ -1280,8 +1286,9 @@ local function CreateKloceUI()
         end
 
         if activeMode then
-            if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- odswiez/rozglos swoj klucz
-            if GK.BroadcastPresence then GK.BroadcastPresence() end  -- pobudka puli online
+            if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- K: odswiez/rozglos swoj klucz
+            if GK.BroadcastPresence then GK.BroadcastPresence() end  -- H: pobudka puli online
+            if GK.BroadcastParty then GK.BroadcastParty() end        -- P: sklad
         end
         RefreshList()
         RefreshPartyList()

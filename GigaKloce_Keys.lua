@@ -81,32 +81,28 @@ local function myGuildNote()
     end
     return ""
 end
+GK.MyGuildNote = myGuildNote   -- udostepnij (presence wysyla notatke jako atrybut gracza)
 
 -- Rozglasza Twoj klucz po KANALE (cicho, cross-guild) i zapisuje lokalnie.
+-- UWAGA: klucz niesie TYLKO dungeon+level. ilvl/notatka/strefa to atrybuty GRACZA -> ida w presence,
+-- dzieki czemu pokazuja sie tez dla osob BEZ klucza.
 function GK.BroadcastMyKey()
     local dungeon, level = GK.GetMyKeystone()
     if not dungeon then return end
     local me = GetUnitFullName("player")
-    local _, ilvl = GetAverageItemLevel()
-    ilvl = math.floor((ilvl or 0) + 0.5)
-    local note = (myGuildNote():gsub("[%c~]", " ")):sub(1, 60)   -- bez znakow kontrolnych/~, limit
-    -- UWAGA: strefa/typ instancji NIE leci z kluczem — jedzie z presence (GK.BroadcastPresence),
-    -- dzieki czemu lokalizacje znamy TEZ dla osob bez klucza.
-    guildKeys[normalizeName(me)] = { name = displayName(me), dungeon = dungeon, level = level or 0, ilvl = ilvl, note = note, t = GetTime() }
+    guildKeys[normalizeName(me)] = { name = displayName(me), dungeon = dungeon, level = level or 0, t = GetTime() }
     local s = GK.CHAN_SEP
-    GK.SendChan("K" .. s .. (tostring(dungeon):gsub("[%c~]", " ")) .. s .. (level or 0) .. s .. ilvl .. s .. note)
+    GK.SendChan("K" .. s .. (tostring(dungeon):gsub("[%c~]", " ")) .. s .. (level or 0))
     if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
 end
 
 -- Odbior klucza z kanalu (pola juz rozbite przez parser w Events).
-function GK.ReceiveKey(sender, dungeon, lvl, ilvl, note)
+function GK.ReceiveKey(sender, dungeon, lvl)
     if not dungeon or dungeon == "" then return end
     guildKeys[normalizeName(sender)] = {
         name = displayName(sender),
         dungeon = dungeon,
         level = tonumber(lvl) or 0,
-        ilvl = tonumber(ilvl) or 0,
-        note = note or "",
         t = GetTime(),
     }
     if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then

@@ -268,8 +268,9 @@ f:SetScript("OnEvent", function(self, event, ...)
         end
         -- presence+klucze po kanale; push list po GUILD (do gildii) — pierwszy raz po 8 s
         C_Timer.After(8, function()
-            if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- kanal
-            if GK.BroadcastPresence then GK.BroadcastPresence() end -- kanal
+            if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- kanal: K
+            if GK.BroadcastPresence then GK.BroadcastPresence() end -- kanal: H
+            if GK.BroadcastParty then GK.BroadcastParty() end       -- kanal: P
             if GK.FullBroadcast then GK.FullBroadcast() end         -- GUILD: wypchnij swoj stan gildii
             if GK.RecordPlayedWith then GK.RecordPlayedWith() end   -- jesli logujesz sie juz w grupie
             -- advert: start ticker when permitted and enabled (first fire is delayed anyway)
@@ -289,6 +290,7 @@ f:SetScript("OnEvent", function(self, event, ...)
             if GK.JoinSyncChannel then GK.JoinSyncChannel() end     -- pilnuj obecnosci w kanale
             if GK.BroadcastMyKey then GK.BroadcastMyKey() end
             if GK.BroadcastPresence then GK.BroadcastPresence() end
+            if GK.BroadcastParty then GK.BroadcastParty() end
         end)
 	elseif event == "PARTY_INVITE_REQUEST" then
         local inviter = ...
@@ -315,14 +317,17 @@ f:SetScript("OnEvent", function(self, event, ...)
         if normalizeName(sender) == normalizeName(GetUnitFullName("player")) then return end
         local parts = { strsplit(GK.CHAN_SEP, text:sub(#GK.CHAN_PFX + 1)) }
         local typ = parts[1]
-        if typ == "H" then          -- presence: class, spec, flags, ver, guild, zone, itype, party
-            if GK.ReceivePresence then GK.ReceivePresence(sender, parts[2], parts[3], parts[4], parts[5], parts[6], parts[7], parts[8], parts[9], parts[10]) end
+        if typ == "H" then          -- core: class, spec, flags, ver, guild, zone, itype, ilvl, note
+            if GK.ReceivePresence then GK.ReceivePresence(sender, parts[2], parts[3], parts[4], parts[5], parts[6], parts[7], parts[8], parts[9], parts[10], parts[11]) end
             if KloceFrame and KloceFrame.mode == "active" then
                 if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
                 if KloceFrame.RefreshList then KloceFrame.RefreshList() end
             end
-        elseif typ == "K" then      -- klucz: dungeon, level, ilvl, note
-            if GK.ReceiveKey then GK.ReceiveKey(sender, parts[2], tonumber(parts[3]), tonumber(parts[4]), parts[5]) end
+        elseif typ == "P" then      -- party/team composition (leader,member,...)
+            if GK.ReceiveParty then GK.ReceiveParty(sender, parts[2]) end
+            if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
+        elseif typ == "K" then      -- key: dungeon, level
+            if GK.ReceiveKey then GK.ReceiveKey(sender, parts[2], tonumber(parts[3])) end
         end
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, msg, channel, sender = ...
@@ -472,12 +477,12 @@ f:SetScript("OnEvent", function(self, event, ...)
 		DetectKloceInGroup()
 		-- Zapamietaj sklad do "last played with" (podpowiedzi w polu Add).
 		if GK.RecordPlayedWith then GK.RecordPlayedWith() end
-		-- Skladu zmienil sie -> rozglos presence (z nowym polem party), debounce zeby nie spamowac kanalu.
+		-- Sklad sie zmienil -> rozglos party (event P), debounce zeby nie spamowac kanalu.
 		if not presenceDebounce then
 			presenceDebounce = true
 			C_Timer.After(2, function()
 				presenceDebounce = false
-				if GK.BroadcastPresence then GK.BroadcastPresence() end
+				if GK.BroadcastParty then GK.BroadcastParty() end
 			end)
 		end
 	end

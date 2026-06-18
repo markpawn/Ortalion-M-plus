@@ -83,35 +83,38 @@ local function myGroupForBroadcast()
     return table.concat(out, PARTY_SEP)
 end
 
+-- "H" core: player attributes (NOT key-specific). ilvl + guild note travel here, so they show
+-- even for players WITHOUT a keystone. Party/team composition is a separate "P" event.
 function GK.BroadcastPresence()
     local _, classFile = UnitClass("player")   -- np. "MAGE" (niezalezne od jezyka)
     local adminBit   = (GK.AmIAdmin and GK.AmIAdmin()) and "1" or "0"
     local blockedBit = (GK.AmIBlocked and GK.AmIBlocked()) and "1" or "0"
     local guild = GetGuildInfo("player") or ""
-    -- strefa + typ instancji (odczyt synchroniczny, leci z presence — wiec znamy lokalizacje TEZ bez klucza)
     local zone = (cleanChan(myZoneText())):sub(1, 40)
     local inInst, itype = IsInInstance()
     if not inInst then itype = "none" end
-    local party = (cleanChan(myGroupForBroadcast())):sub(1, 120)   -- lista skladu (lider pierwszy)
+    local _, ilvl = GetAverageItemLevel()
+    ilvl = math.floor((ilvl or 0) + 0.5)
+    local note = (cleanChan((GK.MyGuildNote and GK.MyGuildNote()) or "")):sub(1, 60)
     local s = GK.CHAN_SEP
     GK.SendChan("H" .. s .. (classFile or "") .. s .. cleanChan(myOwnSpec())
         .. s .. adminBit .. s .. blockedBit .. s .. (GK.DATA_VERSION or 0) .. s .. cleanChan(guild)
-        .. s .. zone .. s .. itype .. s .. party)
+        .. s .. zone .. s .. itype .. s .. ilvl .. s .. note)
+end
+
+-- "P" party/team: composition only (leader first, max 5). Separate event so "H" stays small.
+function GK.BroadcastParty()
+    local s = GK.CHAN_SEP
+    local party = (cleanChan(myGroupForBroadcast())):sub(1, 120)   -- "" when solo -> clears team at receivers
+    GK.SendChan("P" .. s .. party)
 end
 
 -- Wolane z parsera kanalu (Events): pola juz rozbite.
-function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild, zone, itype, party)
+function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild, zone, itype, ilvl, note)
     if class == "" then class = nil end
     if spec == "" then spec = nil end
-    local plist = nil
-    if party and party ~= "" then
-        plist = {}
-        for _, nm in ipairs({ strsplit(PARTY_SEP, party) }) do
-            if nm and nm ~= "" then plist[#plist + 1] = nm end   -- [1] = lider
-        end
-        if #plist < 2 then plist = nil end   -- "team" ma sens dopiero od 2 osob
-    end
     local k = normalizeName(sender)
+    local prev = addonUsers[k]
     addonUsers[k] = {
         name = displayName(sender), class = class, spec = spec, t = GetTime(),
         admin = (adm == "1") or GK.IsSuperAdmin(sender), blocked = (blk == "1"),
@@ -119,9 +122,27 @@ function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild, zone, ity
         guild = (guild and guild ~= "" and guild) or nil,
         zone = (zone and zone ~= "" and zone) or nil,
         itype = (itype and itype ~= "" and itype) or nil,
-        party = plist,
+        ilvl = tonumber(ilvl) or nil,
+        note = (note and note ~= "" and note) or nil,
+        party = prev and prev.party or nil,   -- party comes from the "P" event; don't wipe it here
     }
     cacheUser(sender, class, spec)   -- zawsze pisz do trwalego cache (klasa/spec)
+end
+
+-- "P" event: update only the team composition on the existing presence entry.
+function GK.ReceiveParty(sender, listStr)
+    local u = addonUsers[normalizeName(sender)]
+    if not u then return end   -- no presence yet; "P" follows "H" on the next cycle
+    local plist = nil
+    if listStr and listStr ~= "" then
+        plist = {}
+        for _, nm in ipairs({ strsplit(PARTY_SEP, listStr) }) do
+            if nm and nm ~= "" then plist[#plist + 1] = nm end   -- [1] = leader
+        end
+        if #plist < 2 then plist = nil end   -- a "team" needs at least 2
+    end
+    u.party = plist
+    u.t = GetTime()
 end
 
 -- Zrekonstruowane druzyny z presence (dla toggle "Party"). Zwraca:
@@ -241,6 +262,29 @@ function GK.ZoneOf(name)
     local u = addonUsers[n]
     if u then return u.zone, u.itype end
     return nil
+end
+
+-- ilvl gracza po nicku (siebie na zywo; innych z presence). nil gdy nieznany.
+function GK.IlvlOf(name)
+    if not name then return nil end
+    local n = normalizeName(name)
+    if n == normalizeName(GetUnitFullName("player")) then
+        local _, il = GetAverageItemLevel()
+        return math.floor((il or 0) + 0.5)
+    end
+    local u = addonUsers[n]
+    return u and u.ilvl
+end
+
+-- Publiczna notatka gildiowa gracza po nicku (siebie z rostera; innych z presence). nil/"" gdy brak.
+function GK.NoteOf(name)
+    if not name then return nil end
+    local n = normalizeName(name)
+    if n == normalizeName(GetUnitFullName("player")) then
+        return (GK.MyGuildNote and GK.MyGuildNote()) or ""
+    end
+    local u = addonUsers[n]
+    return u and u.note
 end
 
 -- Czy nadawca ma te sama wersje modelu danych co my?
