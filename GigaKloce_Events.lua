@@ -529,6 +529,61 @@ for i = 1, 4 do
 end
 
 -- ============================
+-- "Invite to guild" w menu Blizzarda (UnitPopup) — np. prawy klik na nicku w czacie.
+-- UWAGA: dotykamy UnitPopup (ten sam mechanizm co taint Set Focus). Testowe; latwy rewert.
+-- ============================
+do
+    local GK_GINV = "GIGAKLOCE_GUILDINVITE"
+    local function canGuildInvite()
+        if CanGuildInvite then return CanGuildInvite() end
+        return IsInGuild()
+    end
+    if UnitPopupButtons and UnitPopupMenus then
+        UnitPopupButtons[GK_GINV] = { text = "Invite to guild", dist = 0 }
+        -- Tylko menu spolecznosciowe (typy uzywane przez dropdown nicku z CZATU). NIE party/raid/unit-frame.
+        local MENUS = { "PLAYER", "FRIEND", "FRIEND_OFFLINE", "CHAT_ROSTER" }
+        for _, m in ipairs(MENUS) do
+            local list = UnitPopupMenus[m]
+            if list then
+                local exists = false
+                for _, v in ipairs(list) do if v == GK_GINV then exists = true break end end
+                if not exists then table.insert(list, #list, GK_GINV) end   -- przed "Cancel"
+            end
+        end
+
+        -- Widocznosc: pokazuj WYLACZNIE w menu nicku otwartym z CZATU.
+        -- Czatowy dropdown to ramka FriendsDropDown (i NIE jest z listy znajomych: friendsList=false).
+        -- Ramki jednostek (PlayerFrameDropDown/PartyMemberFrameXDropDown/...) maja inny obiekt -> nie pokaze sie.
+        hooksecurefunc("UnitPopup_HideButtons", function()
+            local dd = UIDROPDOWNMENU_INIT_MENU
+            local which = dd and dd.which
+            local list = which and UnitPopupMenus[which]
+            if not list then return end
+            local fromChat = (dd == FriendsDropDown) and (not dd.friendsList)
+            for index, value in ipairs(list) do
+                if value == GK_GINV then
+                    local show = fromChat and canGuildInvite() and (dd.name ~= nil and dd.name ~= "")
+                    if not show and UnitPopupShown[UIDROPDOWNMENU_MENU_LEVEL] then
+                        UnitPopupShown[UIDROPDOWNMENU_MENU_LEVEL][index] = 0
+                    end
+                end
+            end
+        end)
+
+        -- Klik: zapros do gildii (sklejamy Name-Realm gdy realm znany).
+        hooksecurefunc("UnitPopup_OnClick", function(self)
+            if self.value ~= GK_GINV then return end
+            local dd = UIDROPDOWNMENU_INIT_MENU
+            local name = dd and dd.name
+            if not name or name == "" then return end
+            local server = dd.server
+            local full = (server and server ~= "" and (name .. "-" .. server)) or name
+            if GuildInvite then GuildInvite(full) end
+        end)
+    end
+end
+
+-- ============================
 -- POPUP DIALOG
 -- ============================
 StaticPopupDialogs["KLOCE_CONFIRM"] = {
