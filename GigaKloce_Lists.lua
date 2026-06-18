@@ -281,7 +281,7 @@ local function FullBroadcast(force, channel, target)
         GK.Send(GK.MSG_GADD .. g .. KLOCE_SEP .. ((GigaKloceDB.guildTs and GigaKloceDB.guildTs[string.lower(g)]) or n), channel, target)
     end
     for lg, t in pairs(GigaKloceDB.guildTomb or {}) do GK.Send(GK.MSG_GREM .. lg .. KLOCE_SEP .. (t or n), channel, target) end
-    -- global-advert: dorzuc aktualny config (LWW), zeby dolaczajacy admin go dostal po pull-syncu
+    -- advert: include current config (LWW) so a joining permitted user gets it after a pull-sync
     if GK.GetAdvConfig then
         local c = GK.GetAdvConfig()
         if c and (c.t or 0) > 0 then

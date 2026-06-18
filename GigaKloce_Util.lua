@@ -138,8 +138,8 @@ local function displayName(stored)
     return n
 end
 
--- ===== Uprawnienia (admin / blocked) =====
--- nazwa bez realmu, lowercase (do porownan z super adminem)
+-- ===== Permissions =====
+-- name without realm, lowercase (for comparison with the privileged identity)
 local function namePart(n)
     if not n or n == "" then return "" end
     local p = strsplit("-", n)
@@ -148,12 +148,12 @@ end
 local function isSuperAdmin(name) return namePart(name) == GK.SUPER_ADMIN end
 GK.IsSuperAdmin = isSuperAdmin
 
--- Czy JA jestem adminem (super albo nadana flaga)?
+-- Am I permitted (privileged identity or granted flag)?
 function GK.AmIAdmin()
     if isSuperAdmin(UnitName("player")) then return true end
     return (GigaKloceDB and GigaKloceDB.myAdmin) == true
 end
--- Czy JA jestem zablokowany? (super admin nigdy)
+-- Am I blocked? (privileged identity never is)
 function GK.AmIBlocked()
     if isSuperAdmin(UnitName("player")) then return false end
     return (GigaKloceDB and GigaKloceDB.myBlocked) == true

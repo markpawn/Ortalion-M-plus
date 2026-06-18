@@ -459,7 +459,7 @@ local function CreateKloceUI()
     local userMenu = CreateFrame("Frame", "GigaKloceUserDD", UIParent, "UIDropDownMenuTemplate")  -- menu kontekstowe userow
 
     -- Wspolne menu kontekstowe dla KAZDEJ listy userow: zawsze Invite + Whisper (poza soba),
-    -- plus opcjonalne dodatkowe pozycje (np. adminowe). Otwierane prawym klikiem.
+    -- plus optional extra items (privileged). Opened with right-click.
     local function openUserMenu(name, extra)
         if not name or name == "" then return end
         local who = displayName(name)
@@ -486,14 +486,14 @@ local function CreateKloceUI()
         return false
     end
 
-    -- Buduje dodatkowe pozycje menu kontekstowego dla usera: adminowe (flagi, announce, most cross-guild)
-    -- oraz Kick (gdy osoba jest w mojej grupie i jestem liderem/asystentem). Dziala dla DOWOLNEJ nazwy z listy.
+    -- Builds extra context-menu items: privileged actions (flags, announce, cross-guild sync) plus
+    -- Kick (when the person is in my group and I'm leader/assistant). Works for ANY name on a list.
     local function buildUserExtra(name)
         local extra = {}
         local amAdmin = GK.AmIAdmin and GK.AmIAdmin()
         local u = GK.addonUsers and GK.addonUsers[normalizeName(name)]
-        -- Adminowe opcje TYLKO dla osob z addonem (lecą whisperem do celu — bez addona nie maja sensu).
-        -- Bez addona w menu zostaje tylko Invite/Whisper (z openUserMenu).
+        -- Privileged options ONLY for addon users (they go via whisper to the target; pointless otherwise).
+        -- Without the addon only Invite/Whisper remain (from openUserMenu).
         if amAdmin and u then
             local iAmSuper = GK.IsSuperAdmin and GK.IsSuperAdmin(UnitName("player"))
             local who = name
@@ -509,16 +509,16 @@ local function CreateKloceUI()
                 func = function() if GK.SetUserFlags then GK.SetUserFlags(who, uAdmin, not uBlocked) end end }
             extra[#extra + 1] = { text = "|cff66ccffAnnounce to their guild...|r", notCheckable = true,
                 func = function() StaticPopup_Show("GIGAKLOCE_ANNOUNCE", displayName(who), nil, who) end }
-            if iAmSuper then   -- MOST cross-guild (tylko Alvcard)
+            if iAmSuper then   -- cross-guild sync
                 extra[#extra + 1] = { text = "|cffffd200Pull sync (cross-guild)|r", notCheckable = true,
                     func = function() if GK.Send then GK.Send(GK.MSG_BREQ, "WHISPER", who) end
-                        GK.out("Bridge: poprosilem " .. displayName(who) .. " o stan.") end }
+                        GK.out("Requested state from " .. displayName(who) .. ".") end }
                 extra[#extra + 1] = { text = "|cffffd200Push sync (cross-guild)|r", notCheckable = true,
                     func = function() if GK.FullBroadcast then GK.FullBroadcast(true, "WHISPER", who) end
-                        GK.out("Bridge: wyslalem swoj stan do " .. displayName(who) .. ".") end }
+                        GK.out("Sent my state to " .. displayName(who) .. ".") end }
                 extra[#extra + 1] = { text = "|cffffd200Force their guild-share|r", notCheckable = true,
                     func = function() if GK.Send then GK.Send(GK.MSG_FSHARE, "WHISPER", who) end
-                        GK.out("Bridge: kazalem " .. displayName(who) .. " zrobic share.") end }
+                        GK.out("Asked " .. displayName(who) .. " to share.") end }
             end
         end
         -- Kick: tylko gdy w mojej grupie, jestem liderem/asystentem i to nie ja
@@ -584,13 +584,13 @@ local function CreateKloceUI()
             { text = "", notCheckable = true, disabled = true },   -- separator
             { text = "Resync", notCheckable = true,
               func = function() if GK.FullBroadcast then GK.FullBroadcast(true) end
-                  GK.out("Resync: wymuszono pelny sync do gildii.") end },
+                  GK.out("Resync: forced a full sync to the guild.") end },
             { text = "Reparty", notCheckable = true,
               disabled = not (IsInGroup() and UnitIsGroupLeader("player")),
               func = function() SlashCmdList["KLOCE"]("reparty") end },
             { text = "Cancel", notCheckable = true, func = function() end },
         }
-        -- Global guild-advert — TYLKO dla adminow (wstawione przed "Cancel")
+        -- Global guild-advert items (gear menu) — inserted before "Cancel"; visible only to permitted users
         if GK.AmIAdmin and GK.AmIAdmin() then
             table.insert(menu, #menu, { text = "", notCheckable = true, disabled = true })   -- separator
             table.insert(menu, #menu, { text = "Guild advert (Global)", isTitle = true, notCheckable = true })
@@ -668,7 +668,7 @@ local function CreateKloceUI()
     end)
     presetToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- toggle "Party" (TYLKO admin/Alvcard): grupuje liste Active w druzyny (kto z kim gra)
+    -- toggle "Party" (permitted users only): groups the Active list into teams (who plays with whom)
     local partyToggle = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
     partyToggle:SetSize(84, 22)
     partyToggle:SetPoint("RIGHT", presetToggle, "LEFT", -6, 0)
@@ -939,7 +939,7 @@ local function CreateKloceUI()
                 ensure(u.name)
             end
 
-            -- toggle "Party" (tylko admin): zrekonstruowane druzyny -> sub-naglowki; ich czlonkowie
+            -- toggle "Party" (permitted only): reconstructed teams -> sub-headers; their members
             -- wypadaja z kubelkow gildii (set `teamed`).
             local teams, teamed
             if KloceFrame.partyOpen and GK.AmIAdmin and GK.AmIAdmin() and GK.GetTeams then
@@ -1020,7 +1020,7 @@ local function CreateKloceUI()
                     end
                     row.text:SetTextColor(1, 1, 1)
                     local nm = it.name
-                    -- prawy klik = menu (Invite/Whisper/admin/Kick); lewy klik = dodaj do presetu TYLKO gdy panel presetu otwarty
+                    -- right click = menu (Invite/Whisper/extras/Kick); left click = add to preset ONLY when preset panel open
                     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                     row:SetScript("OnClick", function(_, button)
                         if button == "RightButton" then
@@ -1237,7 +1237,7 @@ local function CreateKloceUI()
         -- toggle Preset widoczny i podswietlony tylko w Active (gdy wlaczony)
         presetToggle:SetShown(activeMode)
         styleTab(presetToggle, activeMode and KloceFrame.presetOpen)
-        -- toggle Party widoczny TYLKO dla admina/Alvcarda w Active
+        -- Party toggle visible only to permitted users in Active
         local amAdmin = GK.AmIAdmin and GK.AmIAdmin()
         partyToggle:SetShown(activeMode and amAdmin)
         styleTab(partyToggle, activeMode and amAdmin and KloceFrame.partyOpen)

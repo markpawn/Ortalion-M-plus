@@ -33,8 +33,8 @@ end
 GK.CacheUser = function(name, class, spec) cacheUser(name, class, spec) end
 
 -- ===== Presence (po KANALE czatu, cross-guild) =====
--- payload: "H ~ class ~ spec ~ admin ~ blocked ~ ver ~ guild ~ zone ~ itype" (separator GK.CHAN_SEP, drukowalny)
--- zone/itype sa POLAMI DODATKOWYMI na koncu: stare klienty je ignoruja (brak bumpu wersji).
+-- payload: "H ~ class ~ spec ~ f1 ~ f2 ~ ver ~ guild ~ zone ~ itype ~ party" (separator GK.CHAN_SEP, printable)
+-- zone/itype/party are TRAILING fields: older clients ignore them (no version bump).
 local function cleanChan(s) return (tostring(s or "")):gsub("[%c~]", " ") end
 
 -- Moja strefa do wyswietlania. Preferujemy to, CO WIDZI GILDIA (pole `zone` z rostera) — wtedy jest
@@ -159,10 +159,10 @@ function GK.GetTeams()
     return teams, teamed
 end
 
--- ===== Global advert (admin-only): auto-reklama gildii na kanale "Global" =====
--- Config { enabled, text, t } WSPOLNY i synchronizowany LWW miedzy adminami (po GUILD).
--- Interwal staly; pierwszy fire po ADV_INTERVAL (nie na wejscie). Dedup: jesli inny admin
--- rozglosil w ostatnim cyklu (advLastDoneAt), pomijamy TEN fire (timer leci dalej).
+-- ===== Global advert: auto guild ad on the "global" channel =====
+-- Config { enabled, text, t } SHARED and synchronized LWW between permitted users (over GUILD).
+-- Fixed interval; first fire after ADV_INTERVAL (not on login). Dedup: if someone broadcast in
+-- the last cycle (advLastDoneAt), skip THIS fire (the timer keeps running).
 local ADV_INTERVAL = 900   -- co 15 min (pierwszy fire po 15 min; tez okno dedup)
 local ADV_CHANNEL = "global"
 local ADV_SEP = "\031"
@@ -174,13 +174,13 @@ local function advConfig()
 end
 function GK.GetAdvConfig() return advConfig() end
 
--- force = ręczny "Broadcast now" (pomija wymog enabled i okno dedup; dalej wymaga admina/tekstu/kanalu)
+-- force = manual "Broadcast now" (skips enabled + dedup window; still needs permission/text/channel)
 local function doAdvBroadcast(force)
     local c = advConfig()
     if not (GK.AmIAdmin and GK.AmIAdmin()) then if not force then GK.StopAdvTicker() end; return end
     if not force then
         if not c.enabled then GK.StopAdvTicker(); return end
-        -- ktos juz rozglosil w tym cyklu? -> pomin (timer NIE jest kasowany)
+        -- someone already broadcast this cycle? -> skip (the timer is NOT cancelled)
         if (GetTime() - (advLastDoneAt or 0)) < ADV_INTERVAL then return end
     end
     local text = (tostring(c.text or ""):gsub("[%c]", " "))
@@ -188,24 +188,24 @@ local function doAdvBroadcast(force)
     if text == "" then return end
     if #text > 255 then text = text:sub(1, 255) end
     local idx = GetChannelName(ADV_CHANNEL)
-    if not idx or idx == 0 then GK.out("Guild advert: nie jestes na kanale " .. ADV_CHANNEL .. " — pomijam."); return end
+    if not idx or idx == 0 then GK.out("Advert: you're not on the '" .. ADV_CHANNEL .. "' channel — skipping."); return end
     SendChatMessage(text, "CHANNEL", nil, idx)
-    if GK.Send then GK.Send(GK.MSG_ADVDONE, "GUILD") end   -- powiadom innych adminow (dedup)
+    if GK.Send then GK.Send(GK.MSG_ADVDONE, "GUILD") end   -- notify others (dedup)
 end
 
 function GK.StartAdvTicker()
     if advTicker then return end
-    advTicker = C_Timer.NewTicker(ADV_INTERVAL, doAdvBroadcast)   -- pierwszy fire po ADV_INTERVAL
+    advTicker = C_Timer.NewTicker(ADV_INTERVAL, doAdvBroadcast)   -- first fire after ADV_INTERVAL
 end
 function GK.StopAdvTicker()
     if advTicker then advTicker:Cancel(); advTicker = nil end
 end
--- inny admin oznajmil, ze rozglosil w tym cyklu (wycisza nasz najblizszy fire)
+-- someone announced they broadcast this cycle (mutes our next fire)
 function GK.NoteAdvDone() advLastDoneAt = GetTime() end
--- reczne, natychmiastowe rozgloszenie (np. z menu "Broadcast now")
+-- manual immediate broadcast (e.g. from the "Broadcast now" menu)
 function GK.AdvBroadcastNow() doAdvBroadcast(true) end
 
--- Ustaw config lokalnie, rozglos po GUILD (LWW), wlacz/wylacz ticker (gdy admin).
+-- Set config locally, broadcast over GUILD (LWW), start/stop ticker (when permitted).
 function GK.SetAdvConfig(enabled, text)
     local c = advConfig()
     c.enabled = enabled and true or false
@@ -217,11 +217,11 @@ function GK.SetAdvConfig(enabled, text)
     if c.enabled and GK.AmIAdmin and GK.AmIAdmin() then GK.StartAdvTicker() else GK.StopAdvTicker() end
 end
 
--- Odbior configu od innego admina (LWW po t). Aktualizuje lokalny stan i ticker.
+-- Receive config from another permitted user (LWW by t). Updates local state and ticker.
 function GK.ReceiveAdvConfig(t, enBit, text)
     t = tonumber(t) or 0
     local c = advConfig()
-    if t <= (c.t or 0) then return end   -- starsze/rowne -> ignoruj
+    if t <= (c.t or 0) then return end   -- older/equal -> ignore
     c.t = t
     c.enabled = (enBit == "1")
     c.text = text or ""
@@ -461,54 +461,53 @@ function GK.PlayedWithMatches(query, max)
     return out
 end
 
--- ===== Flagi admin/blocked =====
--- Admin wysyla ustawienie flag dla gracza (GUILD; cel + ewentualnie reszta aktualizuja cache/widok).
+-- ===== User flags =====
+-- Send a flag update for a player (via whisper to the target; works cross-guild/realm).
 function GK.SetUserFlags(targetName, admin, blocked)
     if not targetName or targetName == "" then return end
     local nm = (GK.canonicalDisplay and GK.canonicalDisplay(targetName)) or targetName
-    -- SZEPT do celu (dziala cross-guild/realm; GUILD docieralo tylko do wlasnej gildii).
-    -- Cel ustawia sobie flage i rozglasza presence -> wszyscy (tez inne gildie) widza zmiane.
+    -- Whisper to the target; the target applies the flag and rebroadcasts presence so everyone sees it.
     GK.Send(MSG_FLAG .. nm .. PRES_SEP .. (admin and "1" or "0") .. PRES_SEP .. (blocked and "1" or "0"), "WHISPER", nm)
 end
 
--- Odbior FLG: ustaw flagi wg uprawnien nadawcy (admin nadaje tylko super; blocked nadaje kazdy admin).
+-- Receive FLG: apply flags per sender permissions (privileged sender required).
 function GK.ApplyFlag(sender, payload)
     local target, adm, blk = strsplit(PRES_SEP, payload or "", 3)
     if not target or target == "" then return end
     local superSender = GK.IsSuperAdmin(sender)
     local su = addonUsers[normalizeName(sender)]
-    local adminSender = superSender or (su and su.admin)
-    if not adminSender then return end   -- tylko admin moze cokolwiek ustawiac
+    local allowedSender = superSender or (su and su.admin)
+    if not allowedSender then return end   -- only a permitted sender may set anything
     local tkey = normalizeName(target)
     local tu = addonUsers[tkey]
     if tu then
         if superSender then tu.admin = (adm == "1") end
         tu.blocked = (blk == "1")
     end
-    -- jesli to JA jestem celem: ustaw swoje flagi i rozglos presence
+    -- if I'm the target: set my flags and rebroadcast presence
     if tkey == normalizeName(GetUnitFullName("player")) then
         if superSender then GigaKloceDB.myAdmin = (adm == "1") end
         GigaKloceDB.myBlocked = (blk == "1")
-        -- cicho: nikt (nawet sam zainteresowany) nie dostaje komunikatu o zmianie flag
+        -- silent: nobody (not even the target) gets a message about the flag change
         if GK.BroadcastPresence then GK.BroadcastPresence() end
     end
     if KloceFrame and KloceFrame.mode == "active" then
         if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
-        if KloceFrame.RefreshList then KloceFrame.RefreshList() end   -- flagi/[A][B] sa teraz na liscie Active
+        if KloceFrame.RefreshList then KloceFrame.RefreshList() end
     end
 end
 
--- ===== Guild-announce bridge =====
--- Admin wysyla osobie z INNEJ gildii tresc; jej klient wrzuci ja na czat SWOJEJ gildii (z prefiksem [via Nick]).
+-- ===== Cross-guild announce relay =====
+-- Sends text to a recipient in another guild; their client posts it to their guild chat ([via Nick] prefix).
 function GK.SendGuildAnnounce(target, text)
-    if not (GK.AmIAdmin and GK.AmIAdmin()) then GK.out("Tylko admin moze wysylac ogloszenia cross-guild."); return false end
-    if not target or target == "" then GK.out("Podaj odbiorce ogloszenia."); return false end
+    if not (GK.AmIAdmin and GK.AmIAdmin()) then return false end   -- not permitted: do nothing, reveal nothing
+    if not target or target == "" then GK.out("Specify a recipient."); return false end
     text = (tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
-    if text == "" then GK.out("Pusta tresc ogloszenia."); return false end
-    if #text > 230 then text = text:sub(1, 230) end   -- zostaw miejsce na "[via Nick-Realm] " (limit czatu gildii 255)
+    if text == "" then GK.out("Empty announcement text."); return false end
+    if #text > 230 then text = text:sub(1, 230) end   -- leave room for "[via Nick-Realm] " (guild chat limit 255)
     local to = (GK.canonicalDisplay and GK.canonicalDisplay(target)) or target
     GK.Send(GK.MSG_GANN .. text, "WHISPER", to)
-    GK.out("Ogloszenie wyslane do " .. displayName(to) .. " (wrzuci na czat swojej gildii).")
+    GK.out("Announcement sent to " .. displayName(to) .. " (will post to their guild chat).")
     return true
 end
 

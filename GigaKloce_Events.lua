@@ -165,33 +165,31 @@ SlashCmdList["KLOCE"] = function(msg)
         end
 
     elseif cmd == "pull" or cmd == "push" or cmd == "forceshare" then
-        -- MOST cross-guild: tylko Alvcard
-        if not (GK.IsSuperAdmin and GK.IsSuperAdmin(UnitName("player"))) then
-            log("Cross-guild bridge: tylko Alvcard.")
-            return
-        end
+        -- privileged-only; for everyone else do nothing (and reveal nothing)
+        if not (GK.IsSuperAdmin and GK.IsSuperAdmin(UnitName("player"))) then return end
         local name = (rest ~= "" and rest)
             or (UnitExists("target") and UnitIsPlayer("target") and GetUnitFullName("target"))
         if not name or name == "" then log("Usage: /kloce " .. cmd .. " <nick>"); return end
         if cmd == "pull" then
             GK.Send(GK.MSG_BREQ, "WHISPER", name)
-            log("Bridge: poprosilem " .. name .. " o stan (przyjdzie szeptem).")
+            log("Requested state from " .. name .. " (arrives via whisper).")
         elseif cmd == "push" then
             if GK.FullBroadcast then GK.FullBroadcast(true, "WHISPER", name) end
-            log("Bridge: wyslalem swoj stan do " .. name .. " (szeptem).")
+            log("Sent my state to " .. name .. " (via whisper).")
         else  -- forceshare
             GK.Send(GK.MSG_FSHARE, "WHISPER", name)
-            log("Bridge: kazalem " .. name .. " zrobic share w jego gildii.")
+            log("Asked " .. name .. " to share in their guild.")
         end
 
     elseif cmd == "announce" then
-        -- cross-guild ogloszenie: admin -> odbiorca wrzuca tresc na czat SWOJEJ gildii
+        -- privileged-only; non-privileged: do nothing (reveal nothing)
+        if not (GK.AmIAdmin and GK.AmIAdmin()) then return end
         local target, text = rest:match("^(%S+)%s+(.+)$")
-        if not target then log("Usage: /kloce announce <nick> <tresc>"); return end
+        if not target then log("Usage: /kloce announce <nick> <text>"); return end
         if GK.SendGuildAnnounce then GK.SendGuildAnnounce(target, text) end
 
     else
-        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild | announce <nick> <tresc> (admin) | bridge (Alvcard): pull/push/forceshare <nick> | chads: /chad")
+        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild | chads: /chad")
     end
 end
 
@@ -274,7 +272,7 @@ f:SetScript("OnEvent", function(self, event, ...)
             if GK.BroadcastPresence then GK.BroadcastPresence() end -- kanal
             if GK.FullBroadcast then GK.FullBroadcast() end         -- GUILD: wypchnij swoj stan gildii
             if GK.RecordPlayedWith then GK.RecordPlayedWith() end   -- jesli logujesz sie juz w grupie
-            -- global-advert: wystartuj ticker gdy jestem adminem i jest wlaczony (pierwszy fire i tak po 180 s)
+            -- advert: start ticker when permitted and enabled (first fire is delayed anyway)
             if GK.AmIAdmin and GK.AmIAdmin() and GK.GetAdvConfig and GK.GetAdvConfig().enabled and GK.StartAdvTicker then
                 GK.StartAdvTicker()
             end
@@ -317,7 +315,7 @@ f:SetScript("OnEvent", function(self, event, ...)
         if normalizeName(sender) == normalizeName(GetUnitFullName("player")) then return end
         local parts = { strsplit(GK.CHAN_SEP, text:sub(#GK.CHAN_PFX + 1)) }
         local typ = parts[1]
-        if typ == "H" then          -- presence: class, spec, admin, blocked, ver, guild, zone, itype, party
+        if typ == "H" then          -- presence: class, spec, flags, ver, guild, zone, itype, party
             if GK.ReceivePresence then GK.ReceivePresence(sender, parts[2], parts[3], parts[4], parts[5], parts[6], parts[7], parts[8], parts[9], parts[10]) end
             if KloceFrame and KloceFrame.mode == "active" then
                 if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
@@ -340,49 +338,49 @@ f:SetScript("OnEvent", function(self, event, ...)
 			end
 			return
         end
-        if msg:sub(1, 5) == MSG_SYNC then   -- "SYNC?" — pull W OBREBIE GILDII: odpowiadam pelnym stanem po GUILD
+        if msg:sub(1, 5) == MSG_SYNC then   -- "SYNC?" — in-guild pull: reply with full state over GUILD
             if GK.FullBroadcast then GK.FullBroadcast(true) end
             return
         end
-        if msg:sub(1, 3) == MSG_BREQ then   -- "BRQ" — most cross-guild: Alvcard prosi o stan -> wysylam mu SZEPTEM
+        if msg:sub(1, 3) == MSG_BREQ then   -- "BRQ" — directed pull request -> reply with full state via whisper
             if GK.IsSuperAdmin and GK.IsSuperAdmin(sender) and GK.FullBroadcast then
                 GK.FullBroadcast(true, "WHISPER", sender)
             end
             return
         end
-        if msg:sub(1, 3) == MSG_FSHARE then -- "FSH" — most: Alvcard kaze zrobic share w MOJEJ gildii
+        if msg:sub(1, 3) == MSG_FSHARE then -- "FSH" — directed: do a share in MY guild
             if GK.IsSuperAdmin and GK.IsSuperAdmin(sender) and GK.ShareAll then GK.ShareAll() end
             return
         end
-        if msg:sub(1, 4) == MSG_FLAG then   -- "FLG:" — ustawienie flag admin/blocked
+        if msg:sub(1, 4) == MSG_FLAG then   -- "FLG:" — set flags for a player
             if not (channel ~= "WHISPER" and GK.VersionBad and GK.VersionBad(sender)) and GK.ApplyFlag then GK.ApplyFlag(sender, msg:sub(5)) end
             return
         end
-        if msg:sub(1, 5) == GK.MSG_ADVCFG then   -- "ADVC:" — sync configu global-advert (LWW), tylko od admina
+        if msg:sub(1, 5) == GK.MSG_ADVCFG then   -- "ADVC:" — advert config sync (LWW), only from a permitted sender
             local su = GK.addonUsers[normalizeName(sender)]
-            local senderAdmin = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
-            if senderAdmin and GK.ReceiveAdvConfig then
+            local senderAllowed = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
+            if senderAllowed and GK.ReceiveAdvConfig then
                 local t, en, text = strsplit("\031", msg:sub(6), 3)
                 GK.ReceiveAdvConfig(t, en, text)
             end
             return
         end
-        if msg:sub(1, 5) == GK.MSG_ADVDONE then   -- "ADVD:" — inny admin rozglosil w tym cyklu (dedup)
+        if msg:sub(1, 5) == GK.MSG_ADVDONE then   -- "ADVD:" — someone already broadcast this cycle (dedup)
             local su = GK.addonUsers[normalizeName(sender)]
-            local senderAdmin = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
-            if senderAdmin and GK.NoteAdvDone then GK.NoteAdvDone() end
+            local senderAllowed = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
+            if senderAllowed and GK.NoteAdvDone then GK.NoteAdvDone() end
             return
         end
-        if msg:sub(1, 4) == MSG_GANN then   -- "GAN:" — most ogloszen: admin kazal wrzucic tresc na czat MOJEJ gildii
+        if msg:sub(1, 4) == MSG_GANN then   -- "GAN:" — relay request: post the text to MY guild chat
             local text = msg:sub(5)
             local su = GK.addonUsers[normalizeName(sender)]
-            local senderAdmin = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
-            -- tylko szept, nadawca zweryfikowany jako admin (z presence), ja w gildii, tresc niepusta
-            if channel == "WHISPER" and senderAdmin and text ~= "" and IsInGuild() then
+            local senderAllowed = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
+            -- whisper only, sender verified (from presence), I'm in a guild, non-empty text
+            if channel == "WHISPER" and senderAllowed and text ~= "" and IsInGuild() then
                 local line = "[via " .. displayName(sender) .. "] " .. text
                 if #line > 255 then line = line:sub(1, 255) end
                 SendChatMessage(line, "GUILD")
-                log("Guild-announce od " .. displayName(sender) .. " wrzucony na czat gildii.")
+                log("Relayed announce from " .. displayName(sender) .. " to guild chat.")
             end
             return
         end
@@ -667,7 +665,7 @@ hooksecurefunc("ChatEdit_InsertLink", function(link)
 end)
 
 StaticPopupDialogs["GIGAKLOCE_ADVTEXT"] = {
-    text = "Tresc ogloszenia na kanal Global (wspolna dla adminow):",
+    text = "Global channel announcement text:",
     button1 = "Save",
     button2 = "Cancel",
     hasEditBox = true,

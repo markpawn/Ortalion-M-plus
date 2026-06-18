@@ -6,22 +6,21 @@ local ADDON, GK = ...
 GK.AddonPrefix = "GIGA_KLOCE"
 -- Wersja MODELU DANYCH / formatu wiadomosci sync. Sync przyjmujemy tylko od tej samej wersji.
 -- WAZNE: kazda zmiana formatu wiadomosci albo struktury danych MUSI podbic ten numer.
--- v3: presence+klucze przez wlasny kanal czatu (cross-guild); listy sync nadal po GUILD;
---     most cross-guild (Alvcard) po WHISPER.
--- v4: guild-announce bridge (admin -> WHISPER GAN -> klient odbiorcy wrzuca na czat swojej gildii).
+-- v3: presence+klucze przez wlasny kanal czatu (cross-guild); listy sync nadal po GUILD; directed WHISPER state transfer.
+-- v4: cross-guild announce relay (WHISPER GAN -> recipient posts to their guild chat).
 GK.DATA_VERSION = 4
 -- Prefiksy wiadomosci sync po ADDON (GUILD/WHISPER), separator \031: K=kloce, C=chad; +=add, -=remove.
 GK.MSG_KADD, GK.MSG_KREM = "K+:", "K-:"
 GK.MSG_CADD, GK.MSG_CREM = "C+:", "C-:"
 GK.MSG_GADD, GK.MSG_GREM = "G+:", "G-:"   -- sync listy blokowanych gildii
-GK.MSG_SYNC = "SYNC?" -- skierowana (WHISPER) prosba o pelny stan (pull w obrebie gildii)
-GK.MSG_FLAG = "FLG:"  -- ustawienie flag admin/blocked dla gracza (przez admina)
-GK.MSG_BREQ = "BRQ"   -- most cross-guild: prosba o stan (WHISPER, tylko Alvcard)
-GK.MSG_FSHARE = "FSH" -- most cross-guild: "zrob share w swojej gildii" (WHISPER, tylko Alvcard)
-GK.MSG_GANN = "GAN:"  -- guild-announce bridge: admin -> WHISPER -> odbiorca wrzuca tresc na czat SWOJEJ gildii
-GK.MSG_ADVCFG = "ADVC:" -- global-advert: sync configu (enabled+text, LWW) miedzy adminami po GUILD
-GK.MSG_ADVDONE = "ADVD:" -- global-advert: "rozglosilem ten cykl" (dedup) po GUILD
-GK.SUPER_ADMIN = "alvcard"   -- super admin (nazwa bez realmu, lowercase): zawsze admin, nigdy blocked
+GK.MSG_SYNC = "SYNC?" -- directed (WHISPER) request for full state (in-guild pull)
+GK.MSG_FLAG = "FLG:"  -- set user flags for a player
+GK.MSG_BREQ = "BRQ"   -- directed: request state (WHISPER, privileged only)
+GK.MSG_FSHARE = "FSH" -- directed: "do a share in your guild" (WHISPER, privileged only)
+GK.MSG_GANN = "GAN:"  -- cross-guild announce relay: WHISPER -> recipient posts text to THEIR guild chat
+GK.MSG_ADVCFG = "ADVC:" -- advert config sync (enabled+text, LWW) over GUILD
+GK.MSG_ADVDONE = "ADVD:" -- advert "broadcast this cycle" (dedup) over GUILD
+GK.SUPER_ADMIN = "alvcard"   -- privileged identity (name without realm, lowercase)
 
 -- ===== Kanal czatu: presence + klucze (cross-guild). Addon-msg po kanale nie dziala na Tauri,
 -- wiec idzie ZWYKLYM czatem (SendChatMessage) z drukowalnym separatorem; kanal ukryty z okien czatu. =====
@@ -84,8 +83,8 @@ function GK.InitSaved()
     GigaKloceDB.silent = GigaKloceDB.silent or false
     if GigaKloceDB.acceptSync == nil then GigaKloceDB.acceptSync = true end  -- przyjmuj sync od innych
     GigaKloceDB.debug = GigaKloceDB.debug or false   -- gadatliwe logi (domyslnie cicho)
-    GigaKloceDB.myAdmin = GigaKloceDB.myAdmin or false      -- czy mam flage admin (nadaje Alvcard)
-    GigaKloceDB.myBlocked = GigaKloceDB.myBlocked or false  -- czy jestem zablokowany (nie wysylam sync)
+    GigaKloceDB.myAdmin = GigaKloceDB.myAdmin or false      -- my privileged flag
+    GigaKloceDB.myBlocked = GigaKloceDB.myBlocked or false  -- am I blocked (don't send sync)
     -- trwaly cache uzytkownikow z addonem (klasa/spec) — zasilany przez presence, czytany przez presety/listy
     GigaKloceDB.userCache = GigaKloceDB.userCache or {}
     wipe(GK.userCache); for k, v in pairs(GigaKloceDB.userCache) do GK.userCache[k] = v end
@@ -95,7 +94,7 @@ function GK.InitSaved()
     GigaKloceDB.playedWith = nil
     -- lista blokowanych gildii (auto-kloc przy aplikacji do premade)
     GigaKloceDB.blockedGuilds = GigaKloceDB.blockedGuilds or {}
-    -- global-advert (admin-only): wspolny config { enabled, text, t } synchronizowany LWW miedzy adminami
+    -- advert: shared config { enabled, text, t } synchronized LWW between permitted users
     GigaKloceDB.guildAdv = GigaKloceDB.guildAdv or { enabled = false, text = "", t = 0 }
     -- preferowane zrodlo sync (opcjonalne): nick, od ktorego joiner woli ciagnac stan. nil = auto.
     -- GigaKloceDB.syncSource

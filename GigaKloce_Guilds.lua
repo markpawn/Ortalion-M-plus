@@ -248,7 +248,7 @@ function GK.OnWhoListUpdate()
             if GK.AddBlockedGuild then GK.AddBlockedGuild(guild) end
             blockFromGuild(asked, guild, classFile)   -- ta osoba tez od razu na Kloce (z klasa)
         else
-            log("No guild found for " .. displayName(asked) .. " (offline / brak gildii).")
+            log("No guild found for " .. displayName(asked) .. " (offline / no guild).")
         end
     else   -- "check": filtr g-"gildia" juz ograniczyl wynik, wiec dopasowanie nicku = jest w tej gildii
         if matched then
