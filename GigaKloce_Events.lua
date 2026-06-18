@@ -274,6 +274,10 @@ f:SetScript("OnEvent", function(self, event, ...)
             if GK.BroadcastPresence then GK.BroadcastPresence() end -- kanal
             if GK.FullBroadcast then GK.FullBroadcast() end         -- GUILD: wypchnij swoj stan gildii
             if GK.RecordPlayedWith then GK.RecordPlayedWith() end   -- jesli logujesz sie juz w grupie
+            -- global-advert: wystartuj ticker gdy jestem adminem i jest wlaczony (pierwszy fire i tak po 180 s)
+            if GK.AmIAdmin and GK.AmIAdmin() and GK.GetAdvConfig and GK.GetAdvConfig().enabled and GK.StartAdvTicker then
+                GK.StartAdvTicker()
+            end
         end)
         -- po zebraniu presence: pull od zrodla z TEJ SAMEJ gildii (odpowiedz leci po GUILD)
         C_Timer.After(14, function()
@@ -352,6 +356,21 @@ f:SetScript("OnEvent", function(self, event, ...)
         end
         if msg:sub(1, 4) == MSG_FLAG then   -- "FLG:" — ustawienie flag admin/blocked
             if not (channel ~= "WHISPER" and GK.VersionBad and GK.VersionBad(sender)) and GK.ApplyFlag then GK.ApplyFlag(sender, msg:sub(5)) end
+            return
+        end
+        if msg:sub(1, 5) == GK.MSG_ADVCFG then   -- "ADVC:" — sync configu global-advert (LWW), tylko od admina
+            local su = GK.addonUsers[normalizeName(sender)]
+            local senderAdmin = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
+            if senderAdmin and GK.ReceiveAdvConfig then
+                local t, en, text = strsplit("\031", msg:sub(6), 3)
+                GK.ReceiveAdvConfig(t, en, text)
+            end
+            return
+        end
+        if msg:sub(1, 5) == GK.MSG_ADVDONE then   -- "ADVD:" — inny admin rozglosil w tym cyklu (dedup)
+            local su = GK.addonUsers[normalizeName(sender)]
+            local senderAdmin = (GK.IsSuperAdmin and GK.IsSuperAdmin(sender)) or (su and su.admin)
+            if senderAdmin and GK.NoteAdvDone then GK.NoteAdvDone() end
             return
         end
         if msg:sub(1, 4) == MSG_GANN then   -- "GAN:" — most ogloszen: admin kazal wrzucic tresc na czat MOJEJ gildii
@@ -646,6 +665,33 @@ hooksecurefunc("ChatEdit_InsertLink", function(link)
     local eb = GK.announceEditBox
     if link and eb and eb:IsShown() and eb:HasFocus() then eb:Insert(link) end
 end)
+
+StaticPopupDialogs["GIGAKLOCE_ADVTEXT"] = {
+    text = "Tresc ogloszenia na kanal Global (wspolna dla adminow):",
+    button1 = "Save",
+    button2 = "Cancel",
+    hasEditBox = true,
+    maxLetters = 255,
+    editBoxWidth = 320,
+    OnShow = function(self)
+        self.editBox:SetText((GK.GetAdvConfig and GK.GetAdvConfig().text) or "")
+        self.editBox:HighlightText()
+    end,
+    OnAccept = function(self)
+        if GK.SetAdvConfig and GK.GetAdvConfig then
+            GK.SetAdvConfig(GK.GetAdvConfig().enabled, self.editBox:GetText())
+        end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local parent = self:GetParent()
+        if GK.SetAdvConfig and GK.GetAdvConfig then
+            GK.SetAdvConfig(GK.GetAdvConfig().enabled, self:GetText())
+        end
+        parent:Hide()
+    end,
+    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
 
 StaticPopupDialogs["GIGAKLOCE_NEWPRESET"] = {
     text = "New party preset name:",

@@ -159,6 +159,75 @@ function GK.GetTeams()
     return teams, teamed
 end
 
+-- ===== Global advert (admin-only): auto-reklama gildii na kanale "Global" =====
+-- Config { enabled, text, t } WSPOLNY i synchronizowany LWW miedzy adminami (po GUILD).
+-- Interwal staly; pierwszy fire po ADV_INTERVAL (nie na wejscie). Dedup: jesli inny admin
+-- rozglosil w ostatnim cyklu (advLastDoneAt), pomijamy TEN fire (timer leci dalej).
+local ADV_INTERVAL = 900   -- co 15 min (pierwszy fire po 15 min; tez okno dedup)
+local ADV_CHANNEL = "global"
+local ADV_SEP = "\031"
+local advTicker, advLastDoneAt = nil, 0
+
+local function advConfig()
+    GigaKloceDB.guildAdv = GigaKloceDB.guildAdv or { enabled = false, text = "", t = 0 }
+    return GigaKloceDB.guildAdv
+end
+function GK.GetAdvConfig() return advConfig() end
+
+-- force = ręczny "Broadcast now" (pomija wymog enabled i okno dedup; dalej wymaga admina/tekstu/kanalu)
+local function doAdvBroadcast(force)
+    local c = advConfig()
+    if not (GK.AmIAdmin and GK.AmIAdmin()) then if not force then GK.StopAdvTicker() end; return end
+    if not force then
+        if not c.enabled then GK.StopAdvTicker(); return end
+        -- ktos juz rozglosil w tym cyklu? -> pomin (timer NIE jest kasowany)
+        if (GetTime() - (advLastDoneAt or 0)) < ADV_INTERVAL then return end
+    end
+    local text = (tostring(c.text or ""):gsub("[%c]", " "))
+    text = (text:gsub("^%s+", ""):gsub("%s+$", ""))
+    if text == "" then return end
+    if #text > 255 then text = text:sub(1, 255) end
+    local idx = GetChannelName(ADV_CHANNEL)
+    if not idx or idx == 0 then GK.out("Guild advert: nie jestes na kanale " .. ADV_CHANNEL .. " — pomijam."); return end
+    SendChatMessage(text, "CHANNEL", nil, idx)
+    if GK.Send then GK.Send(GK.MSG_ADVDONE, "GUILD") end   -- powiadom innych adminow (dedup)
+end
+
+function GK.StartAdvTicker()
+    if advTicker then return end
+    advTicker = C_Timer.NewTicker(ADV_INTERVAL, doAdvBroadcast)   -- pierwszy fire po ADV_INTERVAL
+end
+function GK.StopAdvTicker()
+    if advTicker then advTicker:Cancel(); advTicker = nil end
+end
+-- inny admin oznajmil, ze rozglosil w tym cyklu (wycisza nasz najblizszy fire)
+function GK.NoteAdvDone() advLastDoneAt = GetTime() end
+-- reczne, natychmiastowe rozgloszenie (np. z menu "Broadcast now")
+function GK.AdvBroadcastNow() doAdvBroadcast(true) end
+
+-- Ustaw config lokalnie, rozglos po GUILD (LWW), wlacz/wylacz ticker (gdy admin).
+function GK.SetAdvConfig(enabled, text)
+    local c = advConfig()
+    c.enabled = enabled and true or false
+    if text ~= nil then c.text = tostring(text) end
+    c.t = (GK.now and GK.now()) or 0
+    if GK.Send then
+        GK.Send(GK.MSG_ADVCFG .. c.t .. ADV_SEP .. (c.enabled and "1" or "0") .. ADV_SEP .. (c.text or ""), "GUILD")
+    end
+    if c.enabled and GK.AmIAdmin and GK.AmIAdmin() then GK.StartAdvTicker() else GK.StopAdvTicker() end
+end
+
+-- Odbior configu od innego admina (LWW po t). Aktualizuje lokalny stan i ticker.
+function GK.ReceiveAdvConfig(t, enBit, text)
+    t = tonumber(t) or 0
+    local c = advConfig()
+    if t <= (c.t or 0) then return end   -- starsze/rowne -> ignoruj
+    c.t = t
+    c.enabled = (enBit == "1")
+    c.text = text or ""
+    if c.enabled and GK.AmIAdmin and GK.AmIAdmin() then GK.StartAdvTicker() else GK.StopAdvTicker() end
+end
+
 -- Strefa + typ instancji gracza po nicku (siebie czytamy na zywo; innych z presence). zone, itype (lub nil).
 function GK.ZoneOf(name)
     if not name then return nil end

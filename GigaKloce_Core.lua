@@ -19,6 +19,8 @@ GK.MSG_FLAG = "FLG:"  -- ustawienie flag admin/blocked dla gracza (przez admina)
 GK.MSG_BREQ = "BRQ"   -- most cross-guild: prosba o stan (WHISPER, tylko Alvcard)
 GK.MSG_FSHARE = "FSH" -- most cross-guild: "zrob share w swojej gildii" (WHISPER, tylko Alvcard)
 GK.MSG_GANN = "GAN:"  -- guild-announce bridge: admin -> WHISPER -> odbiorca wrzuca tresc na czat SWOJEJ gildii
+GK.MSG_ADVCFG = "ADVC:" -- global-advert: sync configu (enabled+text, LWW) miedzy adminami po GUILD
+GK.MSG_ADVDONE = "ADVD:" -- global-advert: "rozglosilem ten cykl" (dedup) po GUILD
 GK.SUPER_ADMIN = "alvcard"   -- super admin (nazwa bez realmu, lowercase): zawsze admin, nigdy blocked
 
 -- ===== Kanal czatu: presence + klucze (cross-guild). Addon-msg po kanale nie dziala na Tauri,
@@ -93,6 +95,8 @@ function GK.InitSaved()
     GigaKloceDB.playedWith = nil
     -- lista blokowanych gildii (auto-kloc przy aplikacji do premade)
     GigaKloceDB.blockedGuilds = GigaKloceDB.blockedGuilds or {}
+    -- global-advert (admin-only): wspolny config { enabled, text, t } synchronizowany LWW miedzy adminami
+    GigaKloceDB.guildAdv = GigaKloceDB.guildAdv or { enabled = false, text = "", t = 0 }
     -- preferowane zrodlo sync (opcjonalne): nick, od ktorego joiner woli ciagnac stan. nil = auto.
     -- GigaKloceDB.syncSource
 

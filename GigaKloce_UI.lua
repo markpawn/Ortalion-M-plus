@@ -441,6 +441,19 @@ local function CreateKloceUI()
     KloceFrame.title:SetPoint("CENTER", KloceFrame.TitleBg, "CENTER", 0, 0)
     KloceFrame.title:SetText("Ortalion M+")
 
+    -- ===== Portret (logo) w lewym gornym rogu =====
+    -- Osobna ramka o WYZSZYM poziomie (inaczej Inset z szablonu zaslania dolna czesc).
+    -- Pozycja zablokowana (CENTER wzgledem KloceFrame TOPLEFT). Okragle przyciecie maska.
+    local portFrame = CreateFrame("Frame", nil, KloceFrame)
+    portFrame:SetFrameLevel(KloceFrame:GetFrameLevel() + 10)
+    portFrame:SetSize(74, 74)
+    portFrame:SetPoint("CENTER", KloceFrame, "TOPLEFT", 25, -21)
+    local portrait = portFrame:CreateTexture(nil, "ARTWORK")
+    portrait:SetAllPoints(portFrame)
+    portrait:SetTexture("Interface\\AddOns\\GigaKloce\\assets\\logo")   -- SetTexture (pewne; SetPortraitToTexture nie laduje custom blp)
+    if portrait.SetMask then portrait:SetMask("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask") end
+    KloceFrame.portrait = portrait
+
     -- ===== Kolko zebate (ustawienia: import snapshotu, accept sync) =====
     local gearMenu = CreateFrame("Frame", "GigaKloceGearDD", UIParent, "UIDropDownMenuTemplate")
     local userMenu = CreateFrame("Frame", "GigaKloceUserDD", UIParent, "UIDropDownMenuTemplate")  -- menu kontekstowe userow
@@ -523,7 +536,7 @@ local function CreateKloceUI()
     end
     local gear = CreateFrame("Button", nil, KloceFrame)
     gear:SetSize(20, 20)
-    gear:SetPoint("TOPRIGHT", -26, -2)   -- na lewo od przycisku [X]
+    gear:SetPoint("TOPRIGHT", -26, -1)   -- na lewo od przycisku [X]
     gear:SetNormalTexture("Interface\\Worldmap\\Gear_64")
     gear:SetHighlightTexture("Interface\\Worldmap\\Gear_64")
     gear:GetNormalTexture():SetTexCoord(0, 0.5, 0, 0.5)      -- wytnij 1 zebatke z siatki 2x2
@@ -577,6 +590,21 @@ local function CreateKloceUI()
               func = function() SlashCmdList["KLOCE"]("reparty") end },
             { text = "Cancel", notCheckable = true, func = function() end },
         }
+        -- Global guild-advert — TYLKO dla adminow (wstawione przed "Cancel")
+        if GK.AmIAdmin and GK.AmIAdmin() then
+            table.insert(menu, #menu, { text = "", notCheckable = true, disabled = true })   -- separator
+            table.insert(menu, #menu, { text = "Guild advert (Global)", isTitle = true, notCheckable = true })
+            table.insert(menu, #menu, { text = "Enabled", isNotRadio = true, keepShownOnClick = true,
+                checked = function() return GK.GetAdvConfig and GK.GetAdvConfig().enabled end,
+                func = function()
+                    local c = GK.GetAdvConfig and GK.GetAdvConfig()
+                    if c and GK.SetAdvConfig then GK.SetAdvConfig(not c.enabled, c.text) end
+                end })
+            table.insert(menu, #menu, { text = "Set advert text...", notCheckable = true,
+                func = function() StaticPopup_Show("GIGAKLOCE_ADVTEXT") end })
+            table.insert(menu, #menu, { text = "Broadcast now", notCheckable = true,
+                func = function() if GK.AdvBroadcastNow then GK.AdvBroadcastNow() end end })
+        end
         EasyMenu(menu, gearMenu, self, 0, -2, "MENU")
     end)
     gear:SetScript("OnEnter", function(self)
@@ -618,7 +646,7 @@ local function CreateKloceUI()
     tabChad:SetSize(86, 22); tabChad:SetText("Chady")
 
     -- kolejnosc na pasku: Active -> Kloce -> Chady
-    tabActive:SetPoint("TOPLEFT", 14, -28)
+    tabActive:SetPoint("TOPLEFT", 64, -28)   -- przesuniete w prawo, zeby nie wchodzic pod portret
     tabKloce:SetPoint("LEFT", tabActive, "RIGHT", 6, 0)
     tabChad:SetPoint("LEFT", tabKloce, "RIGHT", 6, 0)
 
