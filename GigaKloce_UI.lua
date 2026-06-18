@@ -425,7 +425,9 @@ local function CreateKloceUI()
     KloceFrame = CreateFrame("Frame", "KloceFrame", UIParent, "BasicFrameTemplateWithInset")
     KloceFrame:SetMinResize(460, 320)
     KloceFrame:SetSize(saved.sizeW or 560, saved.sizeH or 460)
-    KloceFrame.mode = "keys"
+    KloceFrame.mode = "active"
+    KloceFrame.presetOpen = saved.presetOpen and true or false
+    KloceFrame.partyOpen = saved.partyOpen and true or false
     table.insert(UISpecialFrames, "KloceFrame")
 
     if saved.posX and saved.posY then
@@ -441,7 +443,84 @@ local function CreateKloceUI()
 
     -- ===== Kolko zebate (ustawienia: import snapshotu, accept sync) =====
     local gearMenu = CreateFrame("Frame", "GigaKloceGearDD", UIParent, "UIDropDownMenuTemplate")
-    local userMenu = CreateFrame("Frame", "GigaKloceUserDD", UIParent, "UIDropDownMenuTemplate")  -- menu admina dla online
+    local userMenu = CreateFrame("Frame", "GigaKloceUserDD", UIParent, "UIDropDownMenuTemplate")  -- menu kontekstowe userow
+
+    -- Wspolne menu kontekstowe dla KAZDEJ listy userow: zawsze Invite + Whisper (poza soba),
+    -- plus opcjonalne dodatkowe pozycje (np. adminowe). Otwierane prawym klikiem.
+    local function openUserMenu(name, extra)
+        if not name or name == "" then return end
+        local who = displayName(name)
+        local menu = { { text = who, isTitle = true, notCheckable = true } }
+        if normalizeName(name) ~= normalizeName(GetUnitFullName("player")) then
+            menu[#menu + 1] = { text = "Invite", notCheckable = true,
+                func = function() if InviteUnit then InviteUnit(who) end end }
+            menu[#menu + 1] = { text = "Whisper", notCheckable = true,
+                func = function() if ChatFrame_SendTell then ChatFrame_SendTell(who) end end }
+        end
+        if extra then for _, e in ipairs(extra) do menu[#menu + 1] = e end end
+        menu[#menu + 1] = { text = "Cancel", notCheckable = true, func = function() end }
+        EasyMenu(menu, userMenu, "cursor", 0, 0, "MENU")
+    end
+
+    -- czy dana osoba jest w MOJEJ grupie (po nazwie)
+    local function isInMyGroup(name)
+        if not name or not IsInGroup() then return false end
+        local key = normalizeName(name)
+        for i = 1, GetNumGroupMembers() do
+            local _, nm = RosterUnitName(i)
+            if nm and normalizeName(nm) == key then return true end
+        end
+        return false
+    end
+
+    -- Buduje dodatkowe pozycje menu kontekstowego dla usera: adminowe (flagi, announce, most cross-guild)
+    -- oraz Kick (gdy osoba jest w mojej grupie i jestem liderem/asystentem). Dziala dla DOWOLNEJ nazwy z listy.
+    local function buildUserExtra(name)
+        local extra = {}
+        local amAdmin = GK.AmIAdmin and GK.AmIAdmin()
+        local u = GK.addonUsers and GK.addonUsers[normalizeName(name)]
+        -- Adminowe opcje TYLKO dla osob z addonem (lecą whisperem do celu — bez addona nie maja sensu).
+        -- Bez addona w menu zostaje tylko Invite/Whisper (z openUserMenu).
+        if amAdmin and u then
+            local iAmSuper = GK.IsSuperAdmin and GK.IsSuperAdmin(UnitName("player"))
+            local who = name
+            local uAdmin = u and u.admin
+            local uBlocked = u and u.blocked
+            if iAmSuper then
+                extra[#extra + 1] = { text = "Admin", isNotRadio = true, keepShownOnClick = false,
+                    checked = function() return uAdmin end,
+                    func = function() if GK.SetUserFlags then GK.SetUserFlags(who, not uAdmin, uBlocked) end end }
+            end
+            extra[#extra + 1] = { text = "Blocked", isNotRadio = true, keepShownOnClick = false,
+                checked = function() return uBlocked end,
+                func = function() if GK.SetUserFlags then GK.SetUserFlags(who, uAdmin, not uBlocked) end end }
+            extra[#extra + 1] = { text = "|cff66ccffAnnounce to their guild...|r", notCheckable = true,
+                func = function() StaticPopup_Show("GIGAKLOCE_ANNOUNCE", displayName(who), nil, who) end }
+            if iAmSuper then   -- MOST cross-guild (tylko Alvcard)
+                extra[#extra + 1] = { text = "|cffffd200Pull sync (cross-guild)|r", notCheckable = true,
+                    func = function() if GK.Send then GK.Send(GK.MSG_BREQ, "WHISPER", who) end
+                        GK.out("Bridge: poprosilem " .. displayName(who) .. " o stan.") end }
+                extra[#extra + 1] = { text = "|cffffd200Push sync (cross-guild)|r", notCheckable = true,
+                    func = function() if GK.FullBroadcast then GK.FullBroadcast(true, "WHISPER", who) end
+                        GK.out("Bridge: wyslalem swoj stan do " .. displayName(who) .. ".") end }
+                extra[#extra + 1] = { text = "|cffffd200Force their guild-share|r", notCheckable = true,
+                    func = function() if GK.Send then GK.Send(GK.MSG_FSHARE, "WHISPER", who) end
+                        GK.out("Bridge: kazalem " .. displayName(who) .. " zrobic share.") end }
+            end
+        end
+        -- Kick: tylko gdy w mojej grupie, jestem liderem/asystentem i to nie ja
+        if isInMyGroup(name) and (UnitIsGroupLeader("player") or UnitIsGroupAssistant("player"))
+           and normalizeName(name) ~= normalizeName(GetUnitFullName("player")) then
+            extra[#extra + 1] = { text = "|cffff5555Kick|r", notCheckable = true,
+                func = function()
+                    UninviteUnit(displayName(name))
+                    log("Kloc kicked: " .. displayName(name))
+                    if KloceFrame.RefreshList then KloceFrame.RefreshList() end
+                    if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+                end }
+        end
+        return extra
+    end
     local gear = CreateFrame("Button", nil, KloceFrame)
     gear:SetSize(20, 20)
     gear:SetPoint("TOPRIGHT", -26, -2)   -- na lewo od przycisku [X]
@@ -489,6 +568,13 @@ local function CreateKloceUI()
             { text = "Regenerate today's snapshot", notCheckable = true,
               func = function() if GK.MakeDailySnapshot then GK.MakeDailySnapshot(true) end end },
             { text = "Import snapshot", hasArrow = true, notCheckable = true, menuList = importList },
+            { text = "", notCheckable = true, disabled = true },   -- separator
+            { text = "Resync", notCheckable = true,
+              func = function() if GK.FullBroadcast then GK.FullBroadcast(true) end
+                  GK.out("Resync: wymuszono pelny sync do gildii.") end },
+            { text = "Reparty", notCheckable = true,
+              disabled = not (IsInGroup() and UnitIsGroupLeader("player")),
+              func = function() SlashCmdList["KLOCE"]("reparty") end },
             { text = "Cancel", notCheckable = true, func = function() end },
         }
         EasyMenu(menu, gearMenu, self, 0, -2, "MENU")
@@ -521,24 +607,55 @@ local function CreateKloceUI()
         saved.sizeW, saved.sizeH = KloceFrame:GetWidth(), KloceFrame:GetHeight()
     end)
 
-    -- ===== Zakladki (kolejnosc: Keys | Party | Kloce | Chady) =====
+    -- ===== Zakladki (kolejnosc: Active | Kloce | Chady) =====
+    local tabActive = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
+    tabActive:SetSize(86, 22); tabActive:SetText("Active")
+
     local tabKloce = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
     tabKloce:SetSize(86, 22); tabKloce:SetText("Kloce")
 
     local tabChad = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
     tabChad:SetSize(86, 22); tabChad:SetText("Chady")
 
-    local tabKeys = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
-    tabKeys:SetSize(86, 22); tabKeys:SetText("Keys")
-
-    local tabParty = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
-    tabParty:SetSize(86, 22); tabParty:SetText("Party")
-
-    -- kolejnosc na pasku: Keys -> Party -> Kloce -> Chady
-    tabKeys:SetPoint("TOPLEFT", 14, -28)
-    tabParty:SetPoint("LEFT", tabKeys, "RIGHT", 6, 0)
-    tabKloce:SetPoint("LEFT", tabParty, "RIGHT", 6, 0)
+    -- kolejnosc na pasku: Active -> Kloce -> Chady
+    tabActive:SetPoint("TOPLEFT", 14, -28)
+    tabKloce:SetPoint("LEFT", tabActive, "RIGHT", 6, 0)
     tabChad:SetPoint("LEFT", tabKloce, "RIGHT", 6, 0)
+
+    -- toggle "Preset" (widoczny tylko w Active): otwiera prawy panel z presetem
+    local presetToggle = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
+    presetToggle:SetSize(84, 22)
+    presetToggle:SetPoint("TOPRIGHT", -14, -30)
+    presetToggle:SetText("Preset")
+    presetToggle:SetScript("OnClick", function()
+        KloceFrame.presetOpen = not KloceFrame.presetOpen
+        saved.presetOpen = KloceFrame.presetOpen
+        if KloceFrame.SetMode then KloceFrame.SetMode("active") end
+    end)
+    presetToggle:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Toggle the party preset panel.", 1, 1, 1, true)
+        GameTooltip:AddLine("Left-click someone on the left to add them; left-click in the preset to remove.", 0.8, 0.8, 0.8, true)
+        GameTooltip:Show()
+    end)
+    presetToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    -- toggle "Party" (TYLKO admin/Alvcard): grupuje liste Active w druzyny (kto z kim gra)
+    local partyToggle = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
+    partyToggle:SetSize(84, 22)
+    partyToggle:SetPoint("RIGHT", presetToggle, "LEFT", -6, 0)
+    partyToggle:SetText("Party")
+    partyToggle:SetScript("OnClick", function()
+        KloceFrame.partyOpen = not KloceFrame.partyOpen
+        saved.partyOpen = KloceFrame.partyOpen
+        if KloceFrame.SetMode then KloceFrame.SetMode("active") end
+    end)
+    partyToggle:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+        GameTooltip:AddLine("Group the Active list into teams (who plays with whom).", 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    partyToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     -- styl aktywnej zakladki: podswietlona + zloty tekst; nieaktywna przyciemniona
     local function styleTab(b, active)
@@ -583,6 +700,7 @@ local function CreateKloceUI()
                 GK.SetCurrentPreset(name)
                 UIDropDownMenu_SetText(presetDD, name)
                 if KloceFrame.RefreshList then KloceFrame.RefreshList() end
+                if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end   -- czlonkowie presetu sa w prawym panelu
             end
             UIDropDownMenu_AddButton(info, level)
         end
@@ -714,6 +832,7 @@ local function CreateKloceUI()
         row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -((i - 1) * ROW_H) - 2)
         row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
         row.bg:SetColorTexture(1, 1, 1, (i % 2 == 0) and 0.05 or 0.0)
+        row:SetScript("OnEnter", nil); row:SetScript("OnLeave", nil)  -- reset hover (pula wspoldzielona; tylko Keys ustawia)
         row:Show()
         return row
     end
@@ -762,49 +881,94 @@ local function CreateKloceUI()
     local function RefreshList()
         contentLeft:SetWidth(math.max(scrollLeft:GetWidth(), 50))
 
-        -- Tryb Keys: Party (Twoj sklad) na gorze, potem reszta pogrupowana po GILDII (Z->A), "No Guild" na koncu.
-        if KloceFrame.mode == "keys" then
-            local keys = (GK.GetSortedKeys and GK.GetSortedKeys()) or {}
+        -- Tryb Active: WSZYSCY ludzie (sklad + online z addonem + klucze). Sklad/"Me" na gorze,
+        -- reszta pogrupowana po GILDII (Z->A), "No Guild" na koncu. Osoby bez klucza tez widoczne.
+        if KloceFrame.mode == "active" then
+            -- zbierz unikalne osoby; wpis z kluczem = dane klucza, bez klucza = { name=..., noKey=true }
+            local byName, ordered = {}, {}
+            local function ensure(name)
+                if not name or name == "" then return end
+                local k = normalizeName(name)
+                if not byName[k] then
+                    local e = { name = displayName(name), noKey = true }
+                    byName[k] = e; ordered[#ordered + 1] = e
+                end
+            end
+            for _, kdata in ipairs((GK.GetSortedKeys and GK.GetSortedKeys()) or {}) do
+                local k = normalizeName(kdata.name)
+                if not byName[k] then byName[k] = kdata; ordered[#ordered + 1] = kdata end
+            end
+            ensure(GetUnitFullName("player"))
             local inParty = {}
             if IsInGroup() then
                 for i = 1, GetNumGroupMembers() do
                     local _, nm = RosterUnitName(i)
-                    if nm then inParty[normalizeName(nm)] = true end
+                    if nm then inParty[normalizeName(nm)] = true; ensure(nm) end
                 end
             end
             inParty[normalizeName(GetUnitFullName("player"))] = true
+            for _, u in ipairs((GK.GetOnlineAddonUsers and GK.GetOnlineAddonUsers()) or {}) do
+                ensure(u.name)
+            end
+
+            -- toggle "Party" (tylko admin): zrekonstruowane druzyny -> sub-naglowki; ich czlonkowie
+            -- wypadaja z kubelkow gildii (set `teamed`).
+            local teams, teamed
+            if KloceFrame.partyOpen and GK.AmIAdmin and GK.AmIAdmin() and GK.GetTeams then
+                teams, teamed = GK.GetTeams()
+            end
+
             local NOGUILD = "\255noguild"   -- sentinel: kubel "bez gildii"
             local party, buckets, order = {}, {}, {}
-            for _, k in ipairs(keys) do
-                if inParty[normalizeName(k.name)] then
-                    table.insert(party, k)              -- czlonkowie skladu -> sekcja Party (na gorze)
+            for _, e in ipairs(ordered) do
+                local nk = normalizeName(e.name)
+                if inParty[nk] then
+                    table.insert(party, e)              -- sklad -> sekcja Party/Me (na gorze)
+                elseif teamed and teamed[nk] then
+                    -- pominiete: pokaze sie w sekcji swojego teamu (nizej)
                 else
-                    local g = (GK.GuildOf and GK.GuildOf(k.name)) or ""
+                    local g = (GK.GuildOf and GK.GuildOf(e.name)) or ""
                     local bk = (g ~= "" and g) or NOGUILD
                     if not buckets[bk] then buckets[bk] = {}; order[#order + 1] = bk end
-                    table.insert(buckets[bk], k)        -- kolejnosc wg poziomu zachowana z GetSortedKeys
+                    table.insert(buckets[bk], e)
                 end
             end
+            local function cmp(a, b)   -- poziom klucza malejaco, potem nazwa
+                if (a.level or 0) ~= (b.level or 0) then return (a.level or 0) > (b.level or 0) end
+                return (a.name or "") < (b.name or "")
+            end
+            table.sort(party, cmp)
+            for _, bk in ipairs(order) do table.sort(buckets[bk], cmp) end
             table.sort(order, function(a, b)   -- gildie Z->A; "No Guild" zawsze na koniec
                 if a == NOGUILD then return false end
                 if b == NOGUILD then return true end
                 return a > b
             end)
+
             local items = {}
-            if #party > 0 then
-                items[#items + 1] = { header = "Party (" .. #party .. ")" }
-                for _, k in ipairs(party) do items[#items + 1] = k end
+            -- 1) Twoja grupa (z live rostera) na gorze
+            items[#items + 1] = { header = IsInGroup() and ("Party (" .. #party .. ")") or "Me" }
+            for _, e in ipairs(party) do items[#items + 1] = e end
+            -- 2) Inne druzyny (kto z kim gra) — naglowek "<lider>'s group"
+            if teams then
+                for _, t in ipairs(teams) do
+                    items[#items + 1] = { header = (t.leader or "?") .. "'s group" }
+                    for _, m in ipairs(t.members) do
+                        items[#items + 1] = byName[normalizeName(m.name)] or { name = m.display, noKey = true }
+                    end
+                end
             end
+            -- 3) Reszta w kubelkach gildii
             for _, bk in ipairs(order) do
                 local list = buckets[bk]
                 local label = (bk == NOGUILD) and "No Guild" or bk
                 items[#items + 1] = { header = label .. " (" .. #list .. ")" }
-                for _, k in ipairs(list) do items[#items + 1] = k end
+                for _, e in ipairs(list) do items[#items + 1] = e end
             end
 
-            leftEmpty:SetText("No keys yet — guildies need GigaKloce running.")
-            if #items == 0 then leftEmpty:Show() else leftEmpty:Hide() end
-            leftHeader:SetText("Keys |cff888888(" .. #keys .. ")|r")
+            leftEmpty:SetText("No one around yet — guildies need GigaKloce running.")
+            if #ordered == 0 then leftEmpty:Show() else leftEmpty:Hide() end
+            leftHeader:SetText("Active |cff888888(" .. #ordered .. ")|r")
             for i, it in ipairs(items) do
                 local row = AcquireRow(contentLeft, KloceFrame.items, i)
                 row.chip:Hide(); row.chip:SetWidth(1)
@@ -812,70 +976,58 @@ local function CreateKloceUI()
                 row.btn:Hide()
                 if it.header then
                     row:SetScript("OnClick", nil)
+                    row:SetScript("OnEnter", nil); row:SetScript("OnLeave", nil)
                     row.text:SetText("|cffffd200" .. it.header .. "|r")
                     row.text:SetTextColor(1, 0.82, 0)
                 else
                     local cls = GK.ClassOf and GK.ClassOf(it.name)
-                    local ilvlStr = (it.ilvl and it.ilvl > 0) and ("  |cff9d9d9d" .. it.ilvl .. " ilvl|r") or ""
-                    local noteStr = (it.note and it.note ~= "") and ("  |cff6688aa" .. it.note .. "|r") or ""
-                    row.text:SetText("  " .. classIcon(cls) .. classNameStr(displayName(it.name), cls) .. ilvlStr
-                        .. "  |cff888888—|r  " .. (it.dungeon or "?") .. "   " .. keyLvlStr(it.level) .. noteStr)
+                    local nameStr = classIcon(cls) .. classNameStr(displayName(it.name), cls)
+                    if it.noKey then
+                        row.text:SetText("  " .. nameStr)
+                    else
+                        local ilvlStr = (it.ilvl and it.ilvl > 0) and ("  |cff9d9d9d" .. it.ilvl .. " ilvl|r") or ""
+                        local noteStr = (it.note and it.note ~= "") and ("  |cff6688aa" .. it.note .. "|r") or ""
+                        row.text:SetText("  " .. nameStr .. ilvlStr
+                            .. "  |cff888888—|r  " .. (it.dungeon or "?") .. "   " .. keyLvlStr(it.level) .. noteStr)
+                    end
                     row.text:SetTextColor(1, 1, 1)
-                    -- prawy klik = menu kontekstowe (target / invite / whisper / inspect)
-                    local who = displayName(it.name)
+                    local nm = it.name
+                    -- prawy klik = menu (Invite/Whisper/admin/Kick); lewy klik = dodaj do presetu TYLKO gdy panel presetu otwarty
                     row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
                     row:SetScript("OnClick", function(_, button)
-                        if button ~= "RightButton" then return end
-                        local menu = {
-                            { text = who, isTitle = true, notCheckable = true },
-                            { text = "Invite", notCheckable = true,
-                              func = function() if InviteUnit then InviteUnit(who) end end },
-                            { text = "Whisper", notCheckable = true,
-                              func = function() if ChatFrame_SendTell then ChatFrame_SendTell(who) end end },
-                            { text = "Cancel", notCheckable = true, func = function() end },
-                        }
-                        EasyMenu(menu, userMenu, "cursor", 0, 0, "MENU")
+                        if button == "RightButton" then
+                            openUserMenu(nm, buildUserExtra(nm))
+                        elseif KloceFrame.presetOpen and GK.PartyAddMember and GK.PartyAddMember(nm) then
+                            if KloceFrame.RefreshList then KloceFrame.RefreshList() end
+                            if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+                        end
                     end)
+                    -- hover = strefa + typ instancji (z presence, wiec dziala TEZ bez klucza) + podpowiedz
+                    row:SetScript("OnEnter", function(self)
+                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                        GameTooltip:AddLine(displayName(it.name), 1, 1, 1)
+                        local zone, itype
+                        if GK.ZoneOf then zone, itype = GK.ZoneOf(it.name) end
+                        if zone and zone ~= "" then
+                            GameTooltip:AddLine("Zone: |cffffffff" .. zone .. "|r", 0.7, 0.7, 0.7)
+                        else
+                            GameTooltip:AddLine("Zone: |cff888888unknown|r", 0.7, 0.7, 0.7)
+                        end
+                        local INST = { party = "Mythic+ / Dungeon", raid = "Raid", pvp = "Battleground", arena = "Arena", scenario = "Scenario" }
+                        local lbl = INST[itype or "none"]
+                        if lbl then GameTooltip:AddLine("In instance: " .. lbl, 0.4, 0.8, 1) end
+                        if KloceFrame.presetOpen then
+                            GameTooltip:AddLine("|cff888888Left-click: add to preset|r", 0.5, 0.5, 0.5)
+                        end
+                        GameTooltip:Show()
+                    end)
+                    row:SetScript("OnLeave", function() GameTooltip:Hide() end)
                 end
             end
             for i = #items + 1, #KloceFrame.items do KloceFrame.items[i]:Hide() end
             contentLeft:SetHeight(math.max(#items * ROW_H + 4, 10))
             KloceFrame.leftN = #items
             CullRows(scrollLeft, KloceFrame.items, #items)
-            return
-        end
-
-        -- Tryb Party: lewa lista = czlonkowie aktualnego presetu (z Remove)
-        if KloceFrame.mode == "party" then
-            local members = (GK.GetCurrentMembers and GK.GetCurrentMembers()) or {}
-            local count = #members
-            leftEmpty:SetText("Preset empty — add people from the right panel.")
-            if count == 0 then leftEmpty:Show() else leftEmpty:Hide() end
-            leftHeader:SetText("Preset: " .. (GK.GetCurrentPresetName() or "?") .. " |cff888888(" .. count .. ")|r")
-            for i, nm in ipairs(members) do
-                local row = AcquireRow(contentLeft, KloceFrame.items, i)
-                local cls = GK.ClassOf and GK.ClassOf(nm)
-                local sp = GK.SpecOf and GK.SpecOf(nm)
-                local icon = specIconStr(cls, sp)
-                if icon == "" then icon = classIcon(cls) end
-                row.text:SetText(i .. ".  " .. icon .. classNameStr(displayName(nm), cls))
-                row.text:SetTextColor(1, 1, 1)
-                row.chip:Hide(); row.chip:SetWidth(1)
-                row.icon:Hide()
-                row:SetScript("OnClick", nil)
-                row.btn:Show()
-                row.btn:SetText("Remove")
-                row.btn:Enable()
-                row.btn:SetScript("OnClick", function()
-                    if GK.PartyRemoveMember then GK.PartyRemoveMember(nm) end
-                    if KloceFrame.RefreshList then KloceFrame.RefreshList() end
-                    if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
-                end)
-            end
-            for i = count + 1, #KloceFrame.items do KloceFrame.items[i]:Hide() end
-            contentLeft:SetHeight(math.max(count * ROW_H + 4, 10))
-            KloceFrame.leftN = count
-            CullRows(scrollLeft, KloceFrame.items, count)
             return
         end
 
@@ -899,14 +1051,20 @@ local function CreateKloceUI()
                 -- Chad: bez tag-ikony; klik otwiera detale (class/spec/note edytowalne)
                 row.chip:Hide(); row.chip:SetWidth(1)
                 row.icon:Hide()
-                row:SetScript("OnClick", function() ShowKloceDetails(entry) end)
+                row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                row:SetScript("OnClick", function(_, button)
+                    if button == "RightButton" then openUserMenu(entry) else ShowKloceDetails(entry) end
+                end)
             else
                 -- Kloce: ikona taga + klik w wiersz otwiera detale (chip z tagiem wylaczony)
                 local tag = (info and info.tag) or DEFAULT_TAG
                 row.chip:Hide(); row.chip:SetWidth(1)
                 local iconPath = TAG_ICONS[tag]
                 if iconPath then row.icon:SetTexture(iconPath); row.icon:Show() else row.icon:Hide() end
-                row:SetScript("OnClick", function() ShowKloceDetails(entry) end)
+                row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                row:SetScript("OnClick", function(_, button)
+                    if button == "RightButton" then openUserMenu(entry) else ShowKloceDetails(entry) end
+                end)
             end
             row.btn:Show()
             row.btn:SetText("Remove")
@@ -928,102 +1086,51 @@ local function CreateKloceUI()
     local function RefreshPartyList()
         contentRight:SetWidth(math.max(scrollRight:GetWidth(), 50))
 
-        -- Reparty aktywny tylko gdy jestes w grupie I jestes liderem (aktualizuj w KAZDYM trybie,
-        -- bo tryb "party" robi return przed koncem funkcji)
-        if KloceFrame.repartyBtn then
-            if IsInGroup() and UnitIsGroupLeader("player") then
-                KloceFrame.repartyBtn:Enable()
-            else
-                KloceFrame.repartyBtn:Disable()
+        -- Tryb Active z otwartym presetem: prawy panel = czlonkowie biezacego presetu.
+        -- Lewy klik na wierszu = usun z presetu; prawy klik = Invite/Whisper. (Dodawanie: lewy klik w liscie Active.)
+        if KloceFrame.mode == "active" then
+            if not KloceFrame.presetOpen then
+                for i = 1, #KloceFrame.partyItems do KloceFrame.partyItems[i]:Hide() end
+                rightEmpty:Hide()
+                KloceFrame.rightN = 0
+                return
             end
-        end
-
-        -- Tryb Party: prawy panel = online z addonem (pula do dodania), [Add] dodaje do presetu
-        if KloceFrame.mode == "party" then
-            local online = (GK.GetOnlineAddonUsers and GK.GetOnlineAddonUsers()) or {}
-            local inPreset = {}
-            for _, nm in ipairs((GK.GetCurrentMembers and GK.GetCurrentMembers()) or {}) do
-                inPreset[normalizeName(nm)] = true
-            end
-            rightEmpty:SetText("Nobody online with the addon yet.")
-            if #online == 0 then rightEmpty:Show() else rightEmpty:Hide() end
-            rightHeader:SetText("Online with addon |cff888888(" .. #online .. ")|r")
-            local amAdmin = GK.AmIAdmin and GK.AmIAdmin()
-            for i, u in ipairs(online) do
+            local members = (GK.GetCurrentMembers and GK.GetCurrentMembers()) or {}
+            local count = #members
+            rightEmpty:SetText("Preset empty — left-click people on the left to add.")
+            if count == 0 then rightEmpty:Show() else rightEmpty:Hide() end
+            rightHeader:SetText("Preset: " .. (GK.GetCurrentPresetName() or "?") .. " |cff888888(" .. count .. ")|r")
+            for i, nm in ipairs(members) do
                 local row = AcquireRow(contentRight, KloceFrame.partyItems, i)
-                row.chip:Hide(); row.chip:SetWidth(1); row.icon:Hide()
-                local oicon = specIconStr(u.class, u.spec)
-                if oicon == "" then oicon = classIcon(u.class) end
-                local flags = ""
-                if amAdmin then   -- flagi widzi tylko admin
-                    if u.admin then flags = flags .. "  |cff66ccff[A]|r" end
-                    if u.blocked then flags = flags .. "  |cffff5555[B]|r" end
-                end
-                -- wersja modelu danych: szara gdy zgodna z moja, czerwona gdy inna (nieaktualny klient)
-                local vstr
-                if u.version == GK.DATA_VERSION then vstr = "  |cff888888v" .. u.version .. "|r"
-                else vstr = "  |cffff5555v" .. (u.version or "?") .. "|r" end
-                local gstr = (u.guild and u.guild ~= "") and ("  |cff7f7f7f<" .. u.guild .. ">|r") or ""
-                row.text:SetText(oicon .. displayName(u.name) .. gstr .. vstr .. flags)
-                local cc = u.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[u.class]
-                if cc then row.text:SetTextColor(cc.r, cc.g, cc.b) else row.text:SetTextColor(0.8, 0.9, 1) end
-                -- PRAWY klik (tylko admin): menu kontekstowe — flagi admin/blocked, announce, most
-                if amAdmin then
-                    row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-                    row:SetScript("OnClick", function(_, button)
-                        if button ~= "RightButton" then return end
-                        local iAmSuper = GK.IsSuperAdmin and GK.IsSuperAdmin(UnitName("player"))
-                        local menu = { { text = displayName(u.name), isTitle = true, notCheckable = true } }
-                        if iAmSuper then
-                            menu[#menu + 1] = { text = "Admin", isNotRadio = true, keepShownOnClick = false,
-                                checked = function() return u.admin end,
-                                func = function() if GK.SetUserFlags then GK.SetUserFlags(u.name, not u.admin, u.blocked) end end }
-                        end
-                        menu[#menu + 1] = { text = "Blocked", isNotRadio = true, keepShownOnClick = false,
-                            checked = function() return u.blocked end,
-                            func = function() if GK.SetUserFlags then GK.SetUserFlags(u.name, u.admin, not u.blocked) end end }
-                        do   -- guild-announce: kazdy admin moze wyslac ogloszenie na czat gildii odbiorcy
-                            local who = u.name
-                            menu[#menu + 1] = { text = "|cff66ccffAnnounce to their guild...|r", notCheckable = true,
-                                func = function() StaticPopup_Show("GIGAKLOCE_ANNOUNCE", displayName(who), nil, who) end }
-                        end
-                        if iAmSuper then   -- MOST cross-guild (tylko Alvcard)
-                            local who = u.name
-                            menu[#menu + 1] = { text = "|cffffd200Pull sync (cross-guild)|r", notCheckable = true,
-                                func = function() if GK.Send then GK.Send(GK.MSG_BREQ, "WHISPER", who) end
-                                    GK.out("Bridge: poprosilem " .. displayName(who) .. " o stan.") end }
-                            menu[#menu + 1] = { text = "|cffffd200Push sync (cross-guild)|r", notCheckable = true,
-                                func = function() if GK.FullBroadcast then GK.FullBroadcast(true, "WHISPER", who) end
-                                    GK.out("Bridge: wyslalem swoj stan do " .. displayName(who) .. ".") end }
-                            menu[#menu + 1] = { text = "|cffffd200Force their guild-share|r", notCheckable = true,
-                                func = function() if GK.Send then GK.Send(GK.MSG_FSHARE, "WHISPER", who) end
-                                    GK.out("Bridge: kazalem " .. displayName(who) .. " zrobic share.") end }
-                        end
-                        menu[#menu + 1] = { text = "Cancel", notCheckable = true, func = function() end }
-                        EasyMenu(menu, userMenu, "cursor", 0, 0, "MENU")
-                    end)
-                else
-                    row:SetScript("OnClick", nil)
-                end
-                local already = inPreset[normalizeName(u.name)]
-                row.btn:Show()
-                row.btn:SetText(already and "Added" or "Add")
-                if already then
-                    row.btn:Disable(); row.btn:SetScript("OnClick", nil)
-                else
-                    row.btn:Enable()
-                    row.btn:SetScript("OnClick", function()
-                        if GK.PartyAddMember and GK.PartyAddMember(u.name) then
-                            if KloceFrame.RefreshList then KloceFrame.RefreshList() end
-                            if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
-                        end
-                    end)
-                end
+                row.chip:Hide(); row.chip:SetWidth(1); row.icon:Hide(); row.btn:Hide()
+                local cls = GK.ClassOf and GK.ClassOf(nm)
+                local sp = GK.SpecOf and GK.SpecOf(nm)
+                local icon = specIconStr(cls, sp)
+                if icon == "" then icon = classIcon(cls) end
+                row.text:SetText(i .. ".  " .. icon .. classNameStr(displayName(nm), cls))
+                row.text:SetTextColor(1, 1, 1)
+                row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+                row:SetScript("OnClick", function(_, button)
+                    if button == "RightButton" then
+                        openUserMenu(nm, buildUserExtra(nm))
+                    else   -- lewy klik = usun z presetu
+                        if GK.PartyRemoveMember then GK.PartyRemoveMember(nm) end
+                        if KloceFrame.RefreshList then KloceFrame.RefreshList() end
+                        if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+                    end
+                end)
+                row:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(displayName(nm), 1, 1, 1)
+                    GameTooltip:AddLine("|cff888888Left-click: remove from preset|r", 0.5, 0.5, 0.5)
+                    GameTooltip:Show()
+                end)
+                row:SetScript("OnLeave", function() GameTooltip:Hide() end)
             end
-            for i = #online + 1, #KloceFrame.partyItems do KloceFrame.partyItems[i]:Hide() end
-            contentRight:SetHeight(math.max(#online * ROW_H + 4, 10))
-            KloceFrame.rightN = #online
-            CullRows(scrollRight, KloceFrame.partyItems, #online)
+            for i = count + 1, #KloceFrame.partyItems do KloceFrame.partyItems[i]:Hide() end
+            contentRight:SetHeight(math.max(count * ROW_H + 4, 10))
+            KloceFrame.rightN = count
+            CullRows(scrollRight, KloceFrame.partyItems, count)
             return
         end
 
@@ -1047,7 +1154,8 @@ local function CreateKloceUI()
         for i, m in ipairs(members) do
             local row = AcquireRow(contentRight, KloceFrame.partyItems, i)
             row.chip:Hide(); row.chip:SetWidth(1); row.icon:Hide()
-            row:SetScript("OnClick", nil)   -- wyczysc adminowy onclick z listy "Online with addon" (wspolny pool)
+            row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            row:SetScript("OnClick", function(_, button) if button == "RightButton" then openUserMenu(m.name) end end)
             local info = GetKloceInfo(m.name)
             -- uzupelnij klase w info na podstawie zywej jednostki (gdy brak)
             if info and (not info.class or info.class == "") and m.class then info.class = m.class end
@@ -1089,45 +1197,71 @@ local function CreateKloceUI()
     -- przelaczanie trybu (zakladki)
     local function SetMode(mode)
         KloceFrame.mode = mode
+        styleTab(tabActive, mode == "active")
         styleTab(tabKloce, mode == "kloce")
         styleTab(tabChad, mode == "chad")
-        styleTab(tabKeys, mode == "keys")
-        styleTab(tabParty, mode == "party")
 
-        local keysMode = (mode == "keys")
-        local partyMode = (mode == "party")
-        local showInput = not keysMode and not partyMode
+        local activeMode = (mode == "active")
+        local showInput = (mode == "kloce" or mode == "chad")
         editBox:SetShown(showInput)
         addBtn:SetShown(showInput)
         tip:SetShown(showInput)
-        -- kontrolki Party tylko w trybie party
-        if partyMode then
-            presetDD:Show(); inviteAllBtn:Show()
-            UIDropDownMenu_SetText(presetDD, GK.GetCurrentPresetName() or "")
+        -- toggle Preset widoczny i podswietlony tylko w Active (gdy wlaczony)
+        presetToggle:SetShown(activeMode)
+        styleTab(presetToggle, activeMode and KloceFrame.presetOpen)
+        -- toggle Party widoczny TYLKO dla admina/Alvcarda w Active
+        local amAdmin = GK.AmIAdmin and GK.AmIAdmin()
+        partyToggle:SetShown(activeMode and amAdmin)
+        styleTab(partyToggle, activeMode and amAdmin and KloceFrame.partyOpen)
+
+        -- czy prawy panel jest widoczny:
+        --  Active -> tylko gdy toggle Preset wlaczony (prawy = czlonkowie presetu)
+        --  Kloce/Chady -> zawsze (prawy = "In Group")
+        local splitRight
+        if activeMode then
+            splitRight = KloceFrame.presetOpen and true or false
+            if splitRight then
+                presetDD:ClearAllPoints()
+                presetDD:SetPoint("BOTTOMLEFT", rightPanel, "TOPLEFT", -12, 2)
+                presetDD:Show(); inviteAllBtn:Show()
+                UIDropDownMenu_SetText(presetDD, GK.GetCurrentPresetName() or "")
+            else
+                presetDD:Hide(); inviteAllBtn:Hide()
+            end
         else
             presetDD:Hide(); inviteAllBtn:Hide()
-        end
-        if keysMode then
-            -- Keys: lewa lista na cala szerokosc, prawy panel ukryty
-            rightPanel:Hide()
-            leftPanel:SetPoint("BOTTOMRIGHT", KloceFrame, "BOTTOMRIGHT", -14, 42)
-            leftPanel:SetPoint("TOPLEFT", 14, -62)
-        else
-            rightPanel:Show()
-            leftPanel:SetPoint("BOTTOMRIGHT", KloceFrame, "BOTTOM", -5, 42)
-            leftPanel:SetPoint("TOPLEFT", 14, -88)
+            splitRight = true
         end
 
-        if keysMode and GK.BroadcastMyKey then GK.BroadcastMyKey() end  -- odswiez/rozglos swoj klucz
-        if partyMode and GK.BroadcastPresence then GK.BroadcastPresence() end  -- pobudka puli
+        local BOT = 26   -- zostaw miejsce nad uchwytem zmiany rozmiaru (prawy-dolny rog)
+        local leftTop = activeMode and -62 or -88
+        if not splitRight then
+            -- lewa lista na cala szerokosc, prawy panel ukryty
+            rightPanel:Hide()
+            leftPanel:ClearAllPoints()
+            leftPanel:SetPoint("TOPLEFT", 14, leftTop)
+            leftPanel:SetPoint("BOTTOMRIGHT", KloceFrame, "BOTTOMRIGHT", -14, BOT)
+        else
+            rightPanel:Show()
+            leftPanel:ClearAllPoints()
+            leftPanel:SetPoint("TOPLEFT", 14, leftTop)
+            leftPanel:SetPoint("BOTTOMRIGHT", KloceFrame, "BOTTOM", -5, BOT)
+            rightPanel:ClearAllPoints()
+            rightPanel:SetPoint("TOPRIGHT", -14, -88)
+            rightPanel:SetPoint("BOTTOMLEFT", KloceFrame, "BOTTOM", 5, BOT)
+        end
+
+        if activeMode then
+            if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- odswiez/rozglos swoj klucz
+            if GK.BroadcastPresence then GK.BroadcastPresence() end  -- pobudka puli online
+        end
         RefreshList()
         RefreshPartyList()
     end
     KloceFrame.SetMode = SetMode
+    tabActive:SetScript("OnClick", function() SetMode("active") end)
     tabKloce:SetScript("OnClick", function() SetMode("kloce") end)
     tabChad:SetScript("OnClick", function() SetMode("chad") end)
-    tabKeys:SetScript("OnClick", function() SetMode("keys") end)
-    tabParty:SetScript("OnClick", function() SetMode("party") end)
 
     -- szerokosc dzieci scrolla + culling przy resize i scrollowaniu
     scrollLeft:SetScript("OnSizeChanged", function(self)
@@ -1216,47 +1350,15 @@ local function CreateKloceUI()
         C_Timer.After(0.18, function() if not editBox:HasFocus() then sugFrame:Hide() end end)
     end)
 
-    -- ===== Dolny pasek: Share + Reparty =====
-    local shareBtn = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
-    shareBtn:SetSize(96, 22)
-    shareBtn:SetPoint("BOTTOMLEFT", 14, 10)
-    shareBtn:SetText("Resync")
-    shareBtn:SetScript("OnClick", function()
-        if GK.FullBroadcast then GK.FullBroadcast(true) end   -- wymus pelny sync (sync i tak dziala automatycznie)
-    end)
-    shareBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Force full resync to guildies (sync is automatic on login/changes).", 1, 1, 1, true)
-        GameTooltip:Show()
-    end)
-    shareBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-    local repartyBtn = CreateFrame("Button", nil, KloceFrame, "UIPanelButtonTemplate")
-    repartyBtn:SetSize(96, 22)
-    repartyBtn:SetPoint("LEFT", shareBtn, "RIGHT", 8, 0)
-    repartyBtn:SetText("Reparty")
-    repartyBtn:SetScript("OnClick", function() SlashCmdList["KLOCE"]("reparty") end)
-    repartyBtn:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        if self:IsEnabled() then
-            GameTooltip:AddLine("Disband and rebuild the group.", 1, 1, 1, true)
-        else
-            GameTooltip:AddLine("Reparty: you must be the group leader.", 1, 0.4, 0.4, true)
-        end
-        GameTooltip:Show()
-    end)
-    repartyBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    KloceFrame.repartyBtn = repartyBtn
-
-    -- (Mute alert sound przeniesione do menu kolka zebatego)
+    -- (Resync i Reparty przeniesione do menu kolka zebatego; Mute alert sound tez tam)
 
     -- pierwsze ulozenie (po przeliczeniu rozmiarow przez silnik UI)
     PlaySound(SOUNDKIT.IG_MAINMENU_OPEN)
-    C_Timer.After(0, function() SetMode(KloceFrame.mode or "keys") end)
+    C_Timer.After(0, function() SetMode(KloceFrame.mode or "active") end)
 
     KloceFrame:HookScript("OnShow", function()
         PlaySound(SOUNDKIT.IG_MAINMENU_OPEN)
-        SetMode(KloceFrame.mode or "keys")
+        SetMode(KloceFrame.mode or "active")
     end)
     KloceFrame:HookScript("OnHide", function()
         PlaySound(SOUNDKIT.IG_MAINMENU_CLOSE)

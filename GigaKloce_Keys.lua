@@ -90,10 +90,12 @@ function GK.BroadcastMyKey()
     local _, ilvl = GetAverageItemLevel()
     ilvl = math.floor((ilvl or 0) + 0.5)
     local note = (myGuildNote():gsub("[%c~]", " ")):sub(1, 60)   -- bez znakow kontrolnych/~, limit
+    -- UWAGA: strefa/typ instancji NIE leci z kluczem — jedzie z presence (GK.BroadcastPresence),
+    -- dzieki czemu lokalizacje znamy TEZ dla osob bez klucza.
     guildKeys[normalizeName(me)] = { name = displayName(me), dungeon = dungeon, level = level or 0, ilvl = ilvl, note = note, t = GetTime() }
     local s = GK.CHAN_SEP
     GK.SendChan("K" .. s .. (tostring(dungeon):gsub("[%c~]", " ")) .. s .. (level or 0) .. s .. ilvl .. s .. note)
-    if KloceFrame and KloceFrame.mode == "keys" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
+    if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
 end
 
 -- Odbior klucza z kanalu (pola juz rozbite przez parser w Events).
@@ -107,7 +109,7 @@ function GK.ReceiveKey(sender, dungeon, lvl, ilvl, note)
         note = note or "",
         t = GetTime(),
     }
-    if KloceFrame and KloceFrame.mode == "keys" and KloceFrame.RefreshList then
+    if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then
         KloceFrame.RefreshList()
     end
 end

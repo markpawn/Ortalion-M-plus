@@ -10,6 +10,7 @@ local MSG_FLAG = GK.MSG_FLAG
 local MSG_BREQ, MSG_FSHARE = GK.MSG_BREQ, GK.MSG_FSHARE
 local MSG_GANN = GK.MSG_GANN
 local reparty, repartyLeader, repartyType, repartyStage = {}, nil, nil, nil
+local presenceDebounce = false   -- coalescing presence-broadcast po GROUP_ROSTER_UPDATE
 
 -- ============================
 -- SLASH CMD
@@ -312,9 +313,9 @@ f:SetScript("OnEvent", function(self, event, ...)
         if normalizeName(sender) == normalizeName(GetUnitFullName("player")) then return end
         local parts = { strsplit(GK.CHAN_SEP, text:sub(#GK.CHAN_PFX + 1)) }
         local typ = parts[1]
-        if typ == "H" then          -- presence: class, spec, admin, blocked, ver, guild
-            if GK.ReceivePresence then GK.ReceivePresence(sender, parts[2], parts[3], parts[4], parts[5], parts[6], parts[7]) end
-            if KloceFrame and KloceFrame.mode == "party" then
+        if typ == "H" then          -- presence: class, spec, admin, blocked, ver, guild, zone, itype, party
+            if GK.ReceivePresence then GK.ReceivePresence(sender, parts[2], parts[3], parts[4], parts[5], parts[6], parts[7], parts[8], parts[9], parts[10]) end
+            if KloceFrame and KloceFrame.mode == "active" then
                 if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
                 if KloceFrame.RefreshList then KloceFrame.RefreshList() end
             end
@@ -454,6 +455,14 @@ f:SetScript("OnEvent", function(self, event, ...)
 		DetectKloceInGroup()
 		-- Zapamietaj sklad do "last played with" (podpowiedzi w polu Add).
 		if GK.RecordPlayedWith then GK.RecordPlayedWith() end
+		-- Skladu zmienil sie -> rozglos presence (z nowym polem party), debounce zeby nie spamowac kanalu.
+		if not presenceDebounce then
+			presenceDebounce = true
+			C_Timer.After(2, function()
+				presenceDebounce = false
+				if GK.BroadcastPresence then GK.BroadcastPresence() end
+			end)
+		end
 	end
 end)
 
@@ -591,11 +600,15 @@ StaticPopupDialogs["GIGAKLOCE_NEWPRESET"] = {
     maxLetters = 32,
     OnAccept = function(self)
         local name = self.editBox and self.editBox:GetText()
-        if GK.NewPreset and GK.NewPreset(name) and KloceFrame and KloceFrame.SetMode then KloceFrame.SetMode("party") end
+        if GK.NewPreset and GK.NewPreset(name) and KloceFrame and KloceFrame.SetMode then
+            KloceFrame.presetOpen = true; GigaKloceDB.presetOpen = true; KloceFrame.SetMode("active")
+        end
     end,
     EditBoxOnEnterPressed = function(self)
         local name = self:GetText()
-        if GK.NewPreset and GK.NewPreset(name) and KloceFrame and KloceFrame.SetMode then KloceFrame.SetMode("party") end
+        if GK.NewPreset and GK.NewPreset(name) and KloceFrame and KloceFrame.SetMode then
+            KloceFrame.presetOpen = true; GigaKloceDB.presetOpen = true; KloceFrame.SetMode("active")
+        end
         self:GetParent():Hide()
     end,
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
@@ -608,7 +621,7 @@ StaticPopupDialogs["GIGAKLOCE_DELPRESET"] = {
     button2 = "Cancel",
     OnAccept = function(self, data)
         if GK.DeletePreset then GK.DeletePreset(data) end
-        if KloceFrame and KloceFrame.SetMode then KloceFrame.SetMode("party") end
+        if KloceFrame and KloceFrame.SetMode then KloceFrame.SetMode("active") end
     end,
     timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 }

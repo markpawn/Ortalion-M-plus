@@ -4,20 +4,20 @@
   GitHub doklei pod spodem auto-liste commitow (generate_release_notes).
 -->
 
-# 🛡️ Ortalion M+ — `v4`
+# 🛡️ Ortalion M+ — `v4.1`
 
 Addon do organizacji **Mythic+** (WoW 7.3.5, Tauri). Pełna instrukcja: **[README](README.md)**.
 
-## ✨ Co nowego (v4)
-- 📣 **Guild-announce bridge** — admin wybiera osobę z innej gildii (prawy klik na liście „Online with addon" → **Announce to their guild…**, albo `/kloce announce <nick> <treść>`) i jej klient wrzuca treść na **czat jej gildii** (z prefiksem `[via Nick]`). Auto-relay; odbiorca weryfikuje, że nadawca to admin.
-- 🔗 **Linki w ogłoszeniach** — możesz **shift-klik** wkleić item/czar/quest itp.; u odbiorcy wychodzi klikalny link.
-- 🛠️ **Fix: nadawanie admin/blocked cross-guild** — flagi lecą teraz **szeptem do celu** (wcześniej tylko po kanale gildii, więc nie działały między gildiami).
+## ✨ Co nowego (v4.1)
+- 🧹 **Jeden widok „Active"** — zakładki **Keys** i **Party** scalone. 3 zakładki: **Active · Kloce · Chady**. Active pokazuje **wszystkich** (skład + online z addonem + klucze); Twoja grupa na górze jako **Party**/**Me**, reszta pogrupowana po gildii.
+- 🎛️ **Toggle „Preset"** (po prawej) — chowa/pokazuje panel presetu. Lewy klik na osobie w Active = dodaj do presetu; lewy klik na członku presetu = usuń. Później **Invite all**.
+- 👥 **Toggle „Party"** (tylko admin/Alvcard) — grupuje listę Active w **drużyny** („<lider>'s group"), widać kto z kim gra. Osoby bez addona = sam nick (Invite/Whisper).
+- 📍 **Lokalizacja na hover** — strefa + typ instancji (M+/raid/BG/arena) jedzie teraz z **presence**, więc widać ją **też dla osób bez klucza**. Strefa zgodna z panelem gildii (np. „Frostwall").
+- 🖱️ **Invite/Whisper na każdej liście** (prawy klik). Opcje adminowe (Admin/Blocked/Announce/Pull/Push/Force) tylko dla osób z addonem.
+- ⚙️ **Resync** i **Reparty** przeniesione do menu zębatki (czystszy dolny pasek).
 
-## ✨ Z linii v3 (przypomnienie)
-- 🌍 Cross-guild presence/klucze, 🔑 Keys (grupowanie po gildii, ilvl, notatka), ⌨️ podpowiedzi „played with", 🖱️ menu na graczu = **Alt + lewy klik**.
-
-## 🧬 `DATA_VERSION = 4`
-Sync tylko między zgodnymi wersjami. **Cała ekipa robi `/reload` razem** — v4 nie synchronizuje się z v3/wcześniejszymi.
+## 🧬 `DATA_VERSION = 4` (bez zmian)
+**Kompatybilne z v4.0** — nowe pola (strefa, skład drużyny) są dodatkowe i stare klienty je ignorują. Mimo to zalecany wspólny `/reload`, żeby wszyscy mieli nowy UI.
 
 ## 📥 Instalacja
 Rozpakuj `GigaKloce.zip` do `Interface/AddOns` (w środku jest folder `GigaKloce`) i **przeloguj się** (po pierwszej instalacji sam `/reload` nie wystarczy).

@@ -33,30 +33,145 @@ end
 GK.CacheUser = function(name, class, spec) cacheUser(name, class, spec) end
 
 -- ===== Presence (po KANALE czatu, cross-guild) =====
--- payload: "H ~ class ~ spec ~ admin ~ blocked ~ ver ~ guild" (separator GK.CHAN_SEP, drukowalny)
+-- payload: "H ~ class ~ spec ~ admin ~ blocked ~ ver ~ guild ~ zone ~ itype" (separator GK.CHAN_SEP, drukowalny)
+-- zone/itype sa POLAMI DODATKOWYMI na koncu: stare klienty je ignoruja (brak bumpu wersji).
 local function cleanChan(s) return (tostring(s or "")):gsub("[%c~]", " ") end
+
+-- Moja strefa do wyswietlania. Preferujemy to, CO WIDZI GILDIA (pole `zone` z rostera) — wtedy jest
+-- spojnie z panelem gildii (np. "Frostwall" zamiast budynku "Town Hall"). Fallback: API stref.
+local function myZoneText()
+    if IsInGuild() then
+        if type(GuildRoster) == "function" then GuildRoster() end   -- odswiez (async; czytamy cache)
+        local me = UnitName("player")
+        for i = 1, (GetNumGuildMembers() or 0) do
+            local name, _, _, _, _, zone = GetGuildRosterInfo(i)
+            if name then
+                local nm = strsplit("-", name)   -- roster bywa "Nick-Realm"
+                if nm == me and zone and zone ~= "" then return zone end
+            end
+        end
+    end
+    return GetZoneText() or GetRealZoneText() or ""
+end
+
+-- Moj sklad do broadcastu: lider PIERWSZY, potem reszta, max 5 (lider + do 4 innych), nicki canonical
+-- zlaczone przecinkiem. Solo / poza grupa -> "". (Raid >5: pierwsze 5 wg kolejnosci rostera.)
+local PARTY_SEP = ","
+local function myGroupForBroadcast()
+    if not IsInGroup() then return "" end
+    local canon = GK.canonicalDisplay or function(n) return n end
+    local rost = GK.RosterUnitName
+    if not rost then return "" end
+    local members, leader = {}, nil
+    for i = 1, (GetNumGroupMembers() or 0) do
+        local unit, name = rost(i)
+        if unit and name then
+            local nm = canon(name) or name
+            members[#members + 1] = nm
+            if UnitIsGroupLeader(unit) then leader = nm end
+        end
+    end
+    if #members == 0 then return "" end
+    -- lider pierwszy, reszta w kolejnosci rostera (bez duplikatu lidera), cap 5
+    local out, seen = {}, {}
+    if leader then out[1] = leader; seen[normalizeName(leader)] = true end
+    for _, nm in ipairs(members) do
+        local nk = normalizeName(nm)
+        if not seen[nk] then out[#out + 1] = nm; seen[nk] = true end
+        if #out >= 5 then break end
+    end
+    return table.concat(out, PARTY_SEP)
+end
+
 function GK.BroadcastPresence()
     local _, classFile = UnitClass("player")   -- np. "MAGE" (niezalezne od jezyka)
     local adminBit   = (GK.AmIAdmin and GK.AmIAdmin()) and "1" or "0"
     local blockedBit = (GK.AmIBlocked and GK.AmIBlocked()) and "1" or "0"
     local guild = GetGuildInfo("player") or ""
+    -- strefa + typ instancji (odczyt synchroniczny, leci z presence — wiec znamy lokalizacje TEZ bez klucza)
+    local zone = (cleanChan(myZoneText())):sub(1, 40)
+    local inInst, itype = IsInInstance()
+    if not inInst then itype = "none" end
+    local party = (cleanChan(myGroupForBroadcast())):sub(1, 120)   -- lista skladu (lider pierwszy)
     local s = GK.CHAN_SEP
     GK.SendChan("H" .. s .. (classFile or "") .. s .. cleanChan(myOwnSpec())
-        .. s .. adminBit .. s .. blockedBit .. s .. (GK.DATA_VERSION or 0) .. s .. cleanChan(guild))
+        .. s .. adminBit .. s .. blockedBit .. s .. (GK.DATA_VERSION or 0) .. s .. cleanChan(guild)
+        .. s .. zone .. s .. itype .. s .. party)
 end
 
 -- Wolane z parsera kanalu (Events): pola juz rozbite.
-function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild)
+function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild, zone, itype, party)
     if class == "" then class = nil end
     if spec == "" then spec = nil end
+    local plist = nil
+    if party and party ~= "" then
+        plist = {}
+        for _, nm in ipairs({ strsplit(PARTY_SEP, party) }) do
+            if nm and nm ~= "" then plist[#plist + 1] = nm end   -- [1] = lider
+        end
+        if #plist < 2 then plist = nil end   -- "team" ma sens dopiero od 2 osob
+    end
     local k = normalizeName(sender)
     addonUsers[k] = {
         name = displayName(sender), class = class, spec = spec, t = GetTime(),
         admin = (adm == "1") or GK.IsSuperAdmin(sender), blocked = (blk == "1"),
         version = tonumber(ver) or 1,   -- brak wersji = stary klient
         guild = (guild and guild ~= "" and guild) or nil,
+        zone = (zone and zone ~= "" and zone) or nil,
+        itype = (itype and itype ~= "" and itype) or nil,
+        party = plist,
     }
     cacheUser(sender, class, spec)   -- zawsze pisz do trwalego cache (klasa/spec)
+end
+
+-- Zrekonstruowane druzyny z presence (dla toggle "Party"). Zwraca:
+--   teams  = lista { leader=display, members={ {name=canon, display=, addon=bool}, ... } }  (posort. po liderze)
+--   teamed = set [normalizeName] = true dla WSZYSTKICH osob w teamach (do wykluczenia z kubelkow gildii)
+-- Dedup po kanonicznym kluczu (posortowane znorm. nicki). Pomija team zawierajacy MNIE (moja grupa = sekcja "Party").
+function GK.GetTeams()
+    local now = GetTime()
+    local meKey = normalizeName(GetUnitFullName("player"))
+    local byKey = {}
+    for _, u in pairs(addonUsers) do
+        if u.party and (now - (u.t or 0)) <= PRESENCE_STALE then
+            local keys = {}
+            for _, nm in ipairs(u.party) do keys[#keys + 1] = normalizeName(nm) end
+            table.sort(keys)
+            local key = table.concat(keys, PARTY_SEP)
+            if not byKey[key] then byKey[key] = u.party end   -- pierwszy wygrywa (lider = [1])
+        end
+    end
+    local teams, teamed = {}, {}
+    for _, plist in pairs(byKey) do
+        local containsMe = false
+        for _, nm in ipairs(plist) do if normalizeName(nm) == meKey then containsMe = true; break end end
+        if not containsMe then
+            local members = {}
+            for _, nm in ipairs(plist) do
+                local nk = normalizeName(nm)
+                teamed[nk] = true
+                members[#members + 1] = { name = nm, display = displayName(nm), addon = (addonUsers[nk] ~= nil) }
+            end
+            teams[#teams + 1] = { leader = displayName(plist[1]), members = members }
+        end
+    end
+    table.sort(teams, function(a, b) return (a.leader or "") < (b.leader or "") end)
+    return teams, teamed
+end
+
+-- Strefa + typ instancji gracza po nicku (siebie czytamy na zywo; innych z presence). zone, itype (lub nil).
+function GK.ZoneOf(name)
+    if not name then return nil end
+    local n = normalizeName(name)
+    if n == normalizeName(GetUnitFullName("player")) then
+        local zone = (cleanChan(myZoneText())):sub(1, 40)
+        local inInst, itype = IsInInstance()
+        if not inInst then itype = "none" end
+        return (zone ~= "" and zone) or nil, itype
+    end
+    local u = addonUsers[n]
+    if u then return u.zone, u.itype end
+    return nil
 end
 
 -- Czy nadawca ma te sama wersje modelu danych co my?
@@ -308,7 +423,10 @@ function GK.ApplyFlag(sender, payload)
         -- cicho: nikt (nawet sam zainteresowany) nie dostaje komunikatu o zmianie flag
         if GK.BroadcastPresence then GK.BroadcastPresence() end
     end
-    if KloceFrame and KloceFrame.mode == "party" and KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+    if KloceFrame and KloceFrame.mode == "active" then
+        if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+        if KloceFrame.RefreshList then KloceFrame.RefreshList() end   -- flagi/[A][B] sa teraz na liscie Active
+    end
 end
 
 -- ===== Guild-announce bridge =====
