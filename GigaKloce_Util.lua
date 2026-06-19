@@ -145,7 +145,7 @@ local function namePart(n)
     local p = strsplit("-", n)
     return string.lower(p or "")
 end
-local function isSuperAdmin(name) return namePart(name) == GK.SUPER_ADMIN end
+local function isSuperAdmin(name) return (GK.SUPER_ADMINS or {})[namePart(name)] == true end
 GK.IsSuperAdmin = isSuperAdmin
 
 -- Am I permitted (privileged identity or granted flag)?

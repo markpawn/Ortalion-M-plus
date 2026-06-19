@@ -20,7 +20,7 @@ GK.MSG_FSHARE = "FSH" -- directed: "do a share in your guild" (WHISPER, privileg
 GK.MSG_GANN = "GAN:"  -- cross-guild announce relay: WHISPER -> recipient posts text to THEIR guild chat
 GK.MSG_ADVCFG = "ADVC:" -- advert config sync (enabled+text, LWW) over GUILD
 GK.MSG_ADVDONE = "ADVD:" -- advert "broadcast this cycle" (dedup) over GUILD
-GK.SUPER_ADMIN = "alvcard"   -- privileged identity (name without realm, lowercase)
+GK.SUPER_ADMINS = { alvcard = true, dajkamienia = true }   -- privileged identities (name without realm, lowercase)
 
 -- ===== Kanal czatu: presence + klucze (cross-guild). Addon-msg po kanale nie dziala na Tauri,
 -- wiec idzie ZWYKLYM czatem (SendChatMessage) z drukowalnym separatorem; kanal ukryty z okien czatu. =====
