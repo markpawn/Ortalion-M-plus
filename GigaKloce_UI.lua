@@ -330,7 +330,7 @@ end
 local function BuildDungeonDetailFrame()
     if GigaKloceDungeonFrame then return GigaKloceDungeonFrame end
     local f = CreateFrame("Frame", "GigaKloceDungeonFrame", UIParent, "BasicFrameTemplateWithInset")
-    f:SetSize(340, 230)
+    f:SetSize(320, 470)
     f:SetPoint("CENTER", 0, 40)
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
@@ -373,21 +373,27 @@ local function BuildDungeonDetailFrame()
         if nt and nt ~= "" then add("Note: |cff6688aa" .. nt .. "|r") end
         add(" ")
 
-        local hd, hl, ht
-        if GK.HighKeyOf then hd, hl, ht = GK.HighKeyOf(entry) end
-        if hd then
-            add("|cffffd200Highest key:|r " .. keyLevelColored(hl) .. " " .. hd .. (ht and "  |cff40ff40(timed)|r" or ""))
-        else
-            add("|cffffd200Highest key:|r |cff888888unknown|r")
+        -- best key per podziemie (wszystkie 14 z kanalu "D"); * = w czasie, — = brak
+        add("|cffffd200Best keys:|r |cff888888(* = timed)|r")
+        local best, bestTimed
+        if GK.BestKeysOf then best, bestTimed = GK.BestKeysOf(entry) end
+        best = best or {}
+        for i, dn in ipairs(GK.MPLUS_DUNGEONS or {}) do
+            local short = (GK.MPLUS_SHORT and GK.MPLUS_SHORT[i]) or dn
+            local lvl = best[i] or 0
+            if lvl > 0 then
+                add("  " .. short .. "   " .. keyLevelColored(lvl) .. ((bestTimed and bestTimed[i]) and " |cff40ff40*|r" or ""))
+            else
+                add("  |cff666666" .. short .. "   —|r")
+            end
         end
+        add(" ")
 
         local ld, ll, lt, lp
         if GK.LastRunOf then ld, ll, lt, lp = GK.LastRunOf(entry) end
         if ld then
             local pct = (lp ~= nil) and ("  |cffffffff" .. lp .. "% dmg|r |cff888888(top=100%)|r") or ""
-            add("|cffffd200Last run:|r " .. keyLevelColored(ll) .. " " .. ld .. (lt and "  |cff40ff40(timed)|r" or "") .. pct)
-        else
-            add("|cffffd200Last run:|r |cff888888unknown|r")
+            add("|cffffd200Last run:|r " .. keyLevelColored(ll) .. " " .. ld .. (lt and " |cff40ff40*|r" or "") .. pct)
         end
 
         f.bodyFS:SetText(table.concat(lines, "\n"))
