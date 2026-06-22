@@ -395,6 +395,8 @@ local function BuildDungeonDetailFrame()
             local pct = (lp ~= nil) and ("  |cffffffff" .. lp .. "% dmg|r |cff888888(top=100%)|r") or ""
             add("|cffffd200Last run:|r " .. keyLevelColored(ll) .. " " .. ld .. (lt and " |cff40ff40*|r" or "") .. pct)
         end
+        add(" ")
+        add("|cff888888/kloce runs — lokalna historia (10 ostatnich/podziemie)|r")
 
         f.bodyFS:SetText(table.concat(lines, "\n"))
     end
@@ -406,6 +408,110 @@ function ShowDungeonDetails(entry)
     if not entry or entry == "" then return end
     local f = BuildDungeonDetailFrame()
     f.entry = entry
+    f.RefreshAll()
+    f:Show()
+end
+
+-- ============================
+-- OKNO: HISTORIA RUNOW (LOKALNA, tylko nasz klient) — 10 ostatnich per podziemie
+-- ============================
+local function rnum(n)
+    n = n or 0
+    if n >= 1e6 then return string.format("%.1fM", n / 1e6) end
+    if n >= 1e3 then return string.format("%.1fk", n / 1e3) end
+    return tostring(math.floor(n + 0.5))
+end
+local function rdur(s) s = math.floor(s or 0); return string.format("%d:%02d", math.floor(s / 60), s % 60) end
+local function rwhen(t) return (t and date and date("%d.%m %H:%M", t)) or "?" end
+
+local function BuildRunsFrame()
+    if GigaKloceRunsFrame then return GigaKloceRunsFrame end
+    local f = CreateFrame("Frame", "GigaKloceRunsFrame", UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(400, 460)
+    f:SetPoint("CENTER", 0, 20)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    table.insert(UISpecialFrames, "GigaKloceRunsFrame")
+
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.title:SetPoint("CENTER", f.TitleBg, "CENTER", 0, 0)
+    f.title:SetText("M+ run history (local)")
+
+    local dd = CreateFrame("Frame", "GigaKloceRunsDropdown", f, "UIDropDownMenuTemplate")
+    dd:SetPoint("TOPLEFT", 4, -28)
+    UIDropDownMenu_SetWidth(dd, 230)
+    UIDropDownMenu_Initialize(dd, function(self, level)
+        local list = (GK.DungeonsWithHistory and GK.DungeonsWithHistory()) or {}
+        if #list == 0 then
+            local none = UIDropDownMenu_CreateInfo()
+            none.text = "|cff888888(no runs recorded yet)|r"; none.notCheckable = true; none.disabled = true
+            UIDropDownMenu_AddButton(none, level); return
+        end
+        for _, e in ipairs(list) do
+            local item = UIDropDownMenu_CreateInfo()
+            item.text = e.name .. " |cff888888(" .. e.count .. ")|r"
+            item.value = e.idx
+            item.checked = (f.idx == e.idx)
+            item.func = function() f.idx = e.idx; UIDropDownMenu_SetText(dd, e.name); f.RefreshAll() end
+            UIDropDownMenu_AddButton(item, level)
+        end
+    end)
+    f.dd = dd
+
+    local sf = CreateFrame("ScrollFrame", "GigaKloceRunsScroll", f, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", 12, -58)
+    sf:SetPoint("BOTTOMRIGHT", -34, 14)
+    local content = CreateFrame("Frame", nil, sf)
+    content:SetSize(330, 1)
+    sf:SetScrollChild(content)
+    local body = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    body:SetPoint("TOPLEFT", 0, 0)
+    body:SetWidth(330)
+    body:SetJustifyH("LEFT"); body:SetJustifyV("TOP"); body:SetSpacing(4)
+    f.body = body; f.content = content
+
+    function f.RefreshAll()
+        local idx = f.idx
+        local h = idx and GK.RunHistoryOf and GK.RunHistoryOf(idx)
+        local lines = {}
+        local function add(s) lines[#lines + 1] = s end
+        if not h or #h == 0 then
+            add("|cff888888No runs recorded for this dungeon.|r")
+        else
+            for ri, run in ipairs(h) do
+                local roleNote = ""
+                if run.myRole == "HEALER" then roleNote = "  |cff66ccff(you healed)|r"
+                elseif run.myRole == "TANK" then roleNote = "  |cffffcc66(you tanked)|r" end
+                add(string.format("|cffffd200#%d|r %s%s  |cffffffff%s|r  |cff888888%s|r%s",
+                    ri, keyLevelColored(run.level),
+                    (run.timed and " |cff40ff40*|r" or ""), rdur(run.dur), rwhen(run.when), roleNote))
+                for _, p in ipairs(run.players or {}) do
+                    local mark = p.isSelf and "|cffffd200» |r" or "    "
+                    local cls = p.class and (" |cff888888(" .. (classLocName(p.class)) .. ")|r") or ""
+                    local pct = p.pct and ("  " .. p.pct .. "%") or ""
+                    add(mark .. nameColored(p.name, p.class) .. cls .. "   |cffcccccc" .. rnum(p.dmg) .. "|r" .. pct)
+                end
+                add(" ")
+            end
+        end
+        body:SetText(table.concat(lines, "\n"))
+        content:SetHeight((body:GetStringHeight() or 1) + 8)
+    end
+
+    return f
+end
+
+function ShowRunsWindow(idx)
+    local f = BuildRunsFrame()
+    if not idx then
+        local list = (GK.DungeonsWithHistory and GK.DungeonsWithHistory()) or {}
+        idx = list[1] and list[1].idx or nil
+    end
+    f.idx = idx
+    local nm = idx and GK.MPLUS_DUNGEONS and GK.MPLUS_DUNGEONS[idx]
+    UIDropDownMenu_SetText(f.dd, nm or "(select dungeon)")
     f.RefreshAll()
     f:Show()
 end

@@ -197,8 +197,11 @@ SlashCmdList["KLOCE"] = function(msg)
             log("DPS suggestions after M+: " .. onOff(GigaKloceDB.dpsSuggest))
         end
 
+    elseif cmd == "runs" then
+        if ShowRunsWindow then ShowRunsWindow() else log("Run history UI unavailable.") end
+
     else
-        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild, dps | chads: /chad")
+        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild, dps, runs | chads: /chad")
     end
 end
 

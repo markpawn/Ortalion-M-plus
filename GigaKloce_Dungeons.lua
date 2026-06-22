@@ -71,12 +71,14 @@ local function activeRunInfo()
 end
 
 -- Info o UKONCZONYM przebiegu: preferuj GetCompletionInfo, inaczej kontekst ze startu / instancja.
+-- Zwraca: dungeon, level, timed, durSec (czas przebiegu w s; nil gdy nieznany).
 local function completedRunInfo()
-    local dungeon, level, timed
+    local dungeon, level, timed, durSec
     if C_ChallengeMode and C_ChallengeMode.GetCompletionInfo then
-        local mapID, lvl, _, onTime = C_ChallengeMode.GetCompletionInfo()
+        local mapID, lvl, runMs, onTime = C_ChallengeMode.GetCompletionInfo()
         if lvl and lvl > 0 then level = lvl end
         if onTime ~= nil then timed = onTime and true or false end
+        if runMs and runMs > 0 then durSec = math.floor(runMs / 1000) end
         if mapID and C_ChallengeMode.GetMapUIInfo then
             local name = C_ChallengeMode.GetMapUIInfo(mapID)
             if name and name ~= "" then dungeon = name end
@@ -88,7 +90,7 @@ local function completedRunInfo()
         local iname = GetInstanceInfo()
         if iname and iname ~= "" then dungeon = iname end
     end
-    return dungeon, level, timed
+    return dungeon, level, timed, durSec
 end
 
 -- Wolane z GK.OnChallengeStart (Meter): zapamietaj aktywny klucz na fallback.
@@ -101,7 +103,7 @@ end
 -- ZAPIS PRZEBIEGU (wolane z GK.OnChallengeComplete, Meter)
 -- ============================
 function GK.RecordCompletedRun()
-    local dungeon, level, timed = completedRunInfo()
+    local dungeon, level, timed, durSec = completedRunInfo()
     if not dungeon then return end   -- nie udalo sie zidentyfikowac — pomijamy
     level = level or 0
     local idx = dungeonIndex(dungeon)
@@ -111,13 +113,16 @@ function GK.RecordCompletedRun()
     md.bestTimed = md.bestTimed or {}
     local when = (GK.now and GK.now()) or time()
 
+    local ranked, rmeter, mdur
+    if GK.MeterRankNow then ranked, rmeter, mdur = GK.MeterRankNow() end
+    local dur = durSec or mdur or 0
+
     -- ostatni przebieg + moj % dmg (top = 100%), liczony z metra przez ranking z Part 1
     md.lastIdx = idx or 0
     md.lastLvl = level
     md.lastTimed = timed and true or false
     md.lastWhen = when
     md.lastPct = nil
-    local ranked = GK.MeterRankNow and GK.MeterRankNow()
     if ranked and ranked[1] and ranked[1].dmg > 0 then
         local meKey = normalizeName(GetUnitFullName("player"))
         for _, p in ipairs(ranked) do
@@ -130,6 +135,9 @@ function GK.RecordCompletedRun()
         md.best[idx] = level
         md.bestTimed[idx] = timed and true or false
     end
+
+    -- LOKALNA historia: ostatnie 10 runow per podziemie (NIE wysylane nigdzie)
+    GK.PushRunHistory(idx, level, timed, dur, ranked)
 
     if GK.BroadcastDungeons then GK.BroadcastDungeons() end
     if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
@@ -233,4 +241,59 @@ function GK.LastRunOf(name)
     local r = recOf(name)
     if not r or not r.lastIdx or r.lastIdx == 0 then return nil end
     return GK.MPLUS_DUNGEONS[r.lastIdx], r.lastLvl, r.lastTimed, r.lastPct
+end
+
+-- ============================
+-- LOKALNA HISTORIA RUNOW (tylko nasz klient; NIE wysylana kanalem)
+-- GigaKloceDB.runHistory[idx] = { run, run, ... } newest-first, max 10.
+-- run = { when, level, timed, dur, myRole, players = { {name,class,spec,dmg,dps,pct,isSelf}, ... } }
+-- players = tylko DPS (ranking DAMAGER) — zawiera nas, gdy gramy DPS.
+-- ============================
+local HISTORY_MAX = 10
+
+function GK.PushRunHistory(idx, level, timed, dur, ranked)
+    if not idx or idx == 0 then return end
+    GigaKloceDB.runHistory = GigaKloceDB.runHistory or {}
+    local h = GigaKloceDB.runHistory[idx]
+    if not h then h = {}; GigaKloceDB.runHistory[idx] = h end
+    local top = (ranked and ranked[1] and ranked[1].dmg) or 0
+    local meKey = normalizeName(GetUnitFullName("player"))
+    local players = {}
+    for _, p in ipairs(ranked or {}) do
+        players[#players + 1] = {
+            name = displayName(p.name),
+            class = (GK.ClassOf and GK.ClassOf(p.name)) or nil,
+            spec = (GK.SpecOf and GK.SpecOf(p.name)) or nil,
+            dmg = p.dmg,
+            dps = (dur > 0) and math.floor((p.dmg or 0) / dur + 0.5) or nil,
+            pct = (top > 0) and math.floor((p.dmg or 0) / top * 100 + 0.5) or nil,
+            isSelf = (p.key == meKey) or nil,
+        }
+    end
+    table.insert(h, 1, {
+        when = (GK.now and GK.now()) or time(),
+        level = level, timed = timed and true or false, dur = dur,
+        myRole = (UnitGroupRolesAssigned and UnitGroupRolesAssigned("player")) or nil,
+        players = players,
+    })
+    for i = #h, HISTORY_MAX + 1, -1 do table.remove(h, i) end
+end
+
+-- Historia runow danego podziemia (po indeksie). Zwraca tablice (newest-first) albo nil.
+function GK.RunHistoryOf(idx)
+    return GigaKloceDB and GigaKloceDB.runHistory and GigaKloceDB.runHistory[idx]
+end
+
+-- Lista podziemi, dla ktorych mamy historie: { {idx, name, count, lastWhen}, ... } sort wg lastWhen desc.
+function GK.DungeonsWithHistory()
+    local out = {}
+    local rh = GigaKloceDB and GigaKloceDB.runHistory
+    if not rh then return out end
+    for idx, h in pairs(rh) do
+        if type(h) == "table" and #h > 0 then
+            out[#out + 1] = { idx = idx, name = GK.MPLUS_DUNGEONS[idx] or ("#" .. idx), count = #h, lastWhen = h[1].when or 0 }
+        end
+    end
+    table.sort(out, function(a, b) return (a.lastWhen or 0) > (b.lastWhen or 0) end)
+    return out
 end
