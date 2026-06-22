@@ -29,6 +29,20 @@ local function classColored(cf)
     return classLocName(cf)
 end
 
+-- "Imie" pokolorowane wg klasy (cf = classFile, np. "MAGE").
+local function nameColored(name, cf)
+    local cc = cf and RAID_CLASS_COLORS and RAID_CLASS_COLORS[cf]
+    if cc and cc.colorStr then return "|c" .. cc.colorStr .. name .. "|r" end
+    return name
+end
+-- "+lvl" pokolorowane wg tieru klucza (spojnie z keyLvlStr w RefreshList).
+local function keyLevelColored(lvl)
+    lvl = lvl or 0
+    local hex = (lvl >= 15 and "ff4d3f") or (lvl >= 12 and "ff8c33") or (lvl >= 9 and "a66cf2")
+        or (lvl >= 6 and "4d99ff") or "aaaaaa"
+    return "|cff" .. hex .. "+" .. lvl .. "|r"
+end
+
 -- mapa classFile ("DRUID") -> classID (numer), budowana leniwie raz
 local CLASS_ID_BY_FILE
 local function classIDByFile(cf)
@@ -306,6 +320,86 @@ function ShowKloceDetails(entry)
     f.key = key
     f.entry = entry
     f.isKloce = has_value(gigakloce, entry)
+    f.RefreshAll()
+    f:Show()
+end
+
+-- ============================
+-- OKNO: STATY PODZIEMI (read-only) — highest key + ostatni przebieg (% dmg). Klik usera w Active.
+-- ============================
+local function BuildDungeonDetailFrame()
+    if GigaKloceDungeonFrame then return GigaKloceDungeonFrame end
+    local f = CreateFrame("Frame", "GigaKloceDungeonFrame", UIParent, "BasicFrameTemplateWithInset")
+    f:SetSize(340, 230)
+    f:SetPoint("CENTER", 0, 40)
+    f:SetFrameStrata("DIALOG")
+    f:SetMovable(true); f:EnableMouse(true); f:RegisterForDrag("LeftButton")
+    f:SetScript("OnDragStart", f.StartMoving)
+    f:SetScript("OnDragStop", f.StopMovingOrSizing)
+    table.insert(UISpecialFrames, "GigaKloceDungeonFrame")
+
+    f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.title:SetPoint("CENTER", f.TitleBg, "CENTER", 0, 0)
+    f.title:SetText("M+ stats")
+
+    f.nameFS = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    f.nameFS:SetPoint("TOPLEFT", 16, -34)
+
+    f.bodyFS = f:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    f.bodyFS:SetPoint("TOPLEFT", 16, -62)
+    f.bodyFS:SetPoint("TOPRIGHT", -16, -62)
+    f.bodyFS:SetJustifyH("LEFT"); f.bodyFS:SetJustifyV("TOP"); f.bodyFS:SetSpacing(5)
+
+    function f.RefreshAll()
+        local entry = f.entry
+        if not entry then return end
+        local cf = GK.ClassOf and GK.ClassOf(entry)
+        local sp = GK.SpecOf and GK.SpecOf(entry)
+        local icon = specIconStr(cf, sp)
+        f.nameFS:SetText(icon .. nameColored(displayName(entry), cf))
+
+        local lines = {}
+        local function add(s) lines[#lines + 1] = s end
+
+        local clsSpec = classColored(cf or "")
+        if sp and sp ~= "" then clsSpec = clsSpec .. "  |cffcccccc" .. sp .. "|r" end
+        add(clsSpec)
+
+        local il = GK.IlvlOf and GK.IlvlOf(entry)
+        if il and il > 0 then add("Item level: |cff9d9d9d" .. il .. "|r") end
+        local zone = GK.ZoneOf and GK.ZoneOf(entry)
+        if zone and zone ~= "" then add("Zone: |cffffffff" .. zone .. "|r") end
+        local nt = GK.NoteOf and GK.NoteOf(entry)
+        if nt and nt ~= "" then add("Note: |cff6688aa" .. nt .. "|r") end
+        add(" ")
+
+        local hd, hl, ht
+        if GK.HighKeyOf then hd, hl, ht = GK.HighKeyOf(entry) end
+        if hd then
+            add("|cffffd200Highest key:|r " .. keyLevelColored(hl) .. " " .. hd .. (ht and "  |cff40ff40(timed)|r" or ""))
+        else
+            add("|cffffd200Highest key:|r |cff888888unknown|r")
+        end
+
+        local ld, ll, lt, lp
+        if GK.LastRunOf then ld, ll, lt, lp = GK.LastRunOf(entry) end
+        if ld then
+            local pct = (lp ~= nil) and ("  |cffffffff" .. lp .. "% dmg|r |cff888888(top=100%)|r") or ""
+            add("|cffffd200Last run:|r " .. keyLevelColored(ll) .. " " .. ld .. (lt and "  |cff40ff40(timed)|r" or "") .. pct)
+        else
+            add("|cffffd200Last run:|r |cff888888unknown|r")
+        end
+
+        f.bodyFS:SetText(table.concat(lines, "\n"))
+    end
+
+    return f
+end
+
+function ShowDungeonDetails(entry)
+    if not entry or entry == "" then return end
+    local f = BuildDungeonDetailFrame()
+    f.entry = entry
     f.RefreshAll()
     f:Show()
 end
@@ -1018,10 +1112,16 @@ local function CreateKloceUI()
                     local ilvlStr = (il and il > 0) and ("  |cff9d9d9d" .. il .. " ilvl|r") or ""
                     local nt = GK.NoteOf and GK.NoteOf(it.name)
                     local noteStr = (nt and nt ~= "") and ("  |cff6688aa" .. nt .. "|r") or ""
+                    -- highest key all-time (z kanalu "D") — krotki tag "H:+N"
+                    local hiStr = ""
+                    if GK.HighKeyOf then
+                        local hd, hl = GK.HighKeyOf(it.name)
+                        if hd then hiStr = "  |cffffd200H:|r" .. keyLvlStr(hl) end
+                    end
                     if it.noKey then
-                        row.text:SetText("  " .. nameStr .. ilvlStr .. noteStr)
+                        row.text:SetText("  " .. nameStr .. ilvlStr .. hiStr .. noteStr)
                     else
-                        row.text:SetText("  " .. nameStr .. ilvlStr
+                        row.text:SetText("  " .. nameStr .. ilvlStr .. hiStr
                             .. "  |cff888888—|r  " .. (it.dungeon or "?") .. "   " .. keyLvlStr(it.level) .. noteStr)
                     end
                     row.text:SetTextColor(1, 1, 1)
@@ -1031,9 +1131,13 @@ local function CreateKloceUI()
                     row:SetScript("OnClick", function(_, button)
                         if button == "RightButton" then
                             openUserMenu(nm, buildUserExtra(nm))
-                        elseif KloceFrame.presetOpen and GK.PartyAddMember and GK.PartyAddMember(nm) then
-                            if KloceFrame.RefreshList then KloceFrame.RefreshList() end
-                            if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+                        elseif KloceFrame.presetOpen then
+                            if GK.PartyAddMember and GK.PartyAddMember(nm) then
+                                if KloceFrame.RefreshList then KloceFrame.RefreshList() end
+                                if KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+                            end
+                        elseif ShowDungeonDetails then   -- preset OFF: lewy klik = okno statow M+
+                            ShowDungeonDetails(nm)
                         end
                     end)
                     -- hover = strefa + typ instancji (z presence, wiec dziala TEZ bez klucza) + podpowiedz
@@ -1052,6 +1156,8 @@ local function CreateKloceUI()
                         if lbl then GameTooltip:AddLine("In instance: " .. lbl, 0.4, 0.8, 1) end
                         if KloceFrame.presetOpen then
                             GameTooltip:AddLine("|cff888888Left-click: add to preset|r", 0.5, 0.5, 0.5)
+                        else
+                            GameTooltip:AddLine("|cff888888Left-click: M+ details|r", 0.5, 0.5, 0.5)
                         end
                         GameTooltip:Show()
                     end)

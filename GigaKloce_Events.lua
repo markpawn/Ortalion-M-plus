@@ -283,6 +283,7 @@ f:SetScript("OnEvent", function(self, event, ...)
             if GK.BroadcastMyKey then GK.BroadcastMyKey() end       -- kanal: K
             if GK.BroadcastPresence then GK.BroadcastPresence() end -- kanal: H
             if GK.BroadcastParty then GK.BroadcastParty() end       -- kanal: P
+            if GK.BroadcastDungeons then GK.BroadcastDungeons() end -- kanal: D (highest key + % dmg)
             if GK.FullBroadcast then GK.FullBroadcast() end         -- GUILD: wypchnij swoj stan gildii
             if GK.RecordPlayedWith then GK.RecordPlayedWith() end   -- jesli logujesz sie juz w grupie
             -- advert: start ticker when permitted and enabled (first fire is delayed anyway)
@@ -303,6 +304,7 @@ f:SetScript("OnEvent", function(self, event, ...)
             if GK.BroadcastMyKey then GK.BroadcastMyKey() end
             if GK.BroadcastPresence then GK.BroadcastPresence() end
             if GK.BroadcastParty then GK.BroadcastParty() end
+            if GK.BroadcastDungeons then GK.BroadcastDungeons() end
         end)
 	elseif event == "PARTY_INVITE_REQUEST" then
         local inviter = ...
@@ -346,6 +348,9 @@ f:SetScript("OnEvent", function(self, event, ...)
             if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
         elseif typ == "K" then      -- key: dungeon, level
             if GK.ReceiveKey then GK.ReceiveKey(sender, parts[2], tonumber(parts[3])) end
+        elseif typ == "D" then      -- dungeons: highest key + ostatni przebieg (% dmg)
+            if GK.ReceiveDungeons then GK.ReceiveDungeons(sender, parts[2], parts[3], parts[4], parts[5], parts[6], parts[7], parts[8]) end
+            if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
         end
     elseif event == "CHAT_MSG_ADDON" then
         local prefix, msg, channel, sender = ...

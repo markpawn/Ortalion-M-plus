@@ -127,23 +127,15 @@ end
 local function isAddonUser(k) return GK.addonUsers and GK.addonUsers[k] ~= nil end
 
 -- ============================
--- OCENA + SUGESTIE
--- opts.test = true: dry-run wywolany recznie (/kloce dps now) — wypisuje pelny ranking,
--- pomija przelacznik dpsSuggest, dziala tez bez baseline (uzywa danych skumulowanych jak sa).
+-- RANKING DPS (rola DAMAGER) wg delty obrazen vs baseline.
+-- Zwraca: ranked, meter, dur. ranked = posortowana malejaco lista { key, name, dmg, heal },
+-- zawiera WSZYSTKICH DPS-ow (tez nas, userow z addonem, osoby z list) — filtrowanie kandydatow
+-- robi dopiero logika sugestii. Zwraca nil gdy poza grupa albo brak metra.
 -- ============================
-function GK.MeterEvaluate(opts)
-    opts = opts or {}
-    if not opts.test and not (GigaKloceDB and GigaKloceDB.dpsSuggest) then return end
-    if not IsInGroup() then
-        if opts.test then GK.out("[DPS] Nie jestes w grupie.") end
-        return
-    end
-
+function GK.MeterRankNow()
+    if not IsInGroup() then return nil end
     local now, meter = ReadCumulative()
-    if not now then
-        GK.out("[DPS] Nie znaleziono metra (Details!/Skada/Recount) albo brak danych.")
-        return
-    end
+    if not now then return nil end
 
     -- delta wzgledem baseline (gdy brak baseline: uzyj danych skumulowanych jak sa).
     local function delta(k)
@@ -154,9 +146,8 @@ function GK.MeterEvaluate(opts)
         return { dmg = math.max(0, (cur.dmg or 0) - bd), heal = math.max(0, (cur.heal or 0) - bh) }
     end
 
-    -- Zbierz czlonkow grupy o roli DAMAGER (tank/healer pomijamy). Gdy rola NONE/nieznana:
+    -- Tylko rola DAMAGER (tank/healer pomijamy). Gdy rola NONE/nieznana:
     -- heurystyka z metra — traktuj jak nie-DPS, gdy leczenie dominuje nad obrazeniami.
-    local meKey = normalizeName(GetUnitFullName("player"))
     local ranked = {}
     for i = 1, GetNumGroupMembers() do
         local unit, name = RosterUnitName(i)
@@ -177,20 +168,43 @@ function GK.MeterEvaluate(opts)
     end
 
     table.sort(ranked, function(a, b) return a.dmg > b.dmg end)
+    local dur = baseline and (GetTime() - baseline.stamp) or 0
+    return ranked, meter, dur
+end
+
+-- ============================
+-- OCENA + SUGESTIE
+-- opts.test = true: dry-run wywolany recznie (/kloce dps now) — wypisuje pelny ranking,
+-- pomija przelacznik dpsSuggest, dziala tez bez baseline (uzywa danych skumulowanych jak sa).
+-- ============================
+function GK.MeterEvaluate(opts)
+    opts = opts or {}
+    if not opts.test and not (GigaKloceDB and GigaKloceDB.dpsSuggest) then return end
+    if not IsInGroup() then
+        if opts.test then GK.out("[DPS] Nie jestes w grupie.") end
+        return
+    end
+
+    local ranked, meter, dur = GK.MeterRankNow()
+    if not ranked then
+        GK.out("[DPS] Nie znaleziono metra (Details!/Skada/Recount) albo brak danych.")
+        return
+    end
+    local meKey = normalizeName(GetUnitFullName("player"))
 
     if opts.test then
         GK.out("[DPS] Metr: " .. (meter or "?") .. (baseline and "" or " (BRAK baseline — dane skumulowane)"))
-        local dur = baseline and (GetTime() - baseline.stamp) or 0
+        local top = ranked[1]
         for i, p in ipairs(ranked) do
             local dps = (dur > 0) and (" (" .. fmt(p.dmg / dur) .. " dps)") or ""
-            GK.out(string.format("  %d. %s — %s%s", i, displayName(p.name), fmt(p.dmg), dps))
+            local pct = (top and top.dmg > 0) and string.format("  %d%%", math.floor(p.dmg / top.dmg * 100 + 0.5)) or ""
+            GK.out(string.format("  %d. %s — %s%s%s", i, displayName(p.name), fmt(p.dmg), dps, pct))
         end
         if #ranked == 0 then GK.out("  (brak graczy DPS w grupie)") end
     end
 
     if #ranked < 2 then return end
 
-    local dur = baseline and (GetTime() - baseline.stamp) or 0
     local function dpsStr(dmg)
         if dur > 0 then return fmt(dmg / dur) .. " dps" end
         return fmt(dmg) .. " dmg"
@@ -220,20 +234,23 @@ end
 -- ============================
 -- WEJSCIA Z EVENTOW (wywolywane z GigaKloce_Events.lua)
 -- ============================
+-- Baseline robimy ZAWSZE (potrzebny i do sugestii, i do % dmg w rekordzie przebiegu),
+-- niezaleznie od przelacznika dpsSuggest. Gate dotyczy tylko popupow sugestii.
 function GK.OnChallengeStart()
-    if not (GigaKloceDB and GigaKloceDB.dpsSuggest) then return end
     GK.MeterSnapshotBaseline()
+    if GK.DungeonsCaptureStart then GK.DungeonsCaptureStart() end   -- zapisz kontekst klucza (fallback)
 end
 
 function GK.OnChallengeComplete()
-    if not (GigaKloceDB and GigaKloceDB.dpsSuggest) then return end
     -- maly poslizg, zeby metr domknal ostatni pull przed odczytem
-    C_Timer.After(2, function() GK.MeterEvaluate() end)
+    C_Timer.After(2, function()
+        if GigaKloceDB and GigaKloceDB.dpsSuggest then GK.MeterEvaluate() end
+        if GK.RecordCompletedRun then GK.RecordCompletedRun() end   -- highest key + % dmg (zawsze)
+    end)
 end
 
 -- Wejscie do instancji M+: gdy nie ma jeszcze baseline (np. po /reload w trakcie), zrob go.
 function GK.OnEnterWorldMeter()
-    if not (GigaKloceDB and GigaKloceDB.dpsSuggest) then return end
     if GK.MeterHasBaseline() then return end
     local active = C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive and C_ChallengeMode.IsChallengeModeActive()
     local diff = select(3, GetInstanceInfo())   -- 7.3.5: difficultyID 8 = Mythic Keystone
