@@ -188,8 +188,17 @@ SlashCmdList["KLOCE"] = function(msg)
         if not target then log("Usage: /kloce announce <nick> <text>"); return end
         if GK.SendGuildAnnounce then GK.SendGuildAnnounce(target, text) end
 
+    elseif cmd == "dps" then
+        local sub = string.lower(rest or "")
+        if sub == "now" then
+            if GK.MeterEvaluate then GK.MeterEvaluate({ test = true }) end   -- dry-run na biezacych danych metra
+        else
+            GigaKloceDB.dpsSuggest = not GigaKloceDB.dpsSuggest
+            log("DPS suggestions after M+: " .. onOff(GigaKloceDB.dpsSuggest))
+        end
+
     else
-        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild | chads: /chad")
+        log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild, dps | chads: /chad")
     end
 end
 
@@ -253,6 +262,9 @@ f:RegisterEvent("INSPECT_READY")
 f:RegisterEvent("LFG_LIST_APPLICANT_LIST_UPDATED")
 f:RegisterEvent("WHO_LIST_UPDATE")
 f:RegisterEvent("CHAT_MSG_CHANNEL")   -- presence + klucze (cross-guild) ida zwyklym czatem na kanale
+f:RegisterEvent("CHALLENGE_MODE_START")       -- start M+: snapshot DPS (baseline)
+f:RegisterEvent("CHALLENGE_MODE_COMPLETED")   -- koniec M+: ocena DPS + sugestie chad/kloc
+f:RegisterEvent("PLAYER_ENTERING_WORLD")      -- wejscie do M+ po /reload: doraisny baseline
 
 f:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -302,6 +314,12 @@ f:SetScript("OnEvent", function(self, event, ...)
     elseif event == "PARTY_LEADER_CHANGED" then
         -- zmiana lidera moze nie odpalic GROUP_ROSTER_UPDATE â€” odswiez stan przycisku Reparty
         if KloceFrame and KloceFrame.RefreshPartyList then KloceFrame.RefreshPartyList() end
+    elseif event == "CHALLENGE_MODE_START" then
+        if GK.OnChallengeStart then GK.OnChallengeStart() end
+    elseif event == "CHALLENGE_MODE_COMPLETED" then
+        if GK.OnChallengeComplete then GK.OnChallengeComplete() end
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        if GK.OnEnterWorldMeter then GK.OnEnterWorldMeter() end
     elseif event == "INSPECT_READY" then
         local guid = ...
         if GK.OnInspectReady then GK.OnInspectReady(guid) end
@@ -622,6 +640,23 @@ StaticPopupDialogs["KLOCE_CONFIRM"] = {
     whileDead = true,
     hideOnEscape = true,
     preferredIndex = 3,
+}
+
+-- Sugestie po M+ (na podstawie DPS z metra). data = pelna nazwa "Imie-Realm".
+StaticPopupDialogs["GIGAKLOCE_DPS_CHAD"] = {
+    text = "%s wykrecil top DPS (%s) — wyraznie ciagnal sklad.\nDodac do chadow?",
+    button1 = "Tak",
+    button2 = "Nie",
+    OnAccept = function(self, data) if data then AddChad(data) end end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
+}
+
+StaticPopupDialogs["GIGAKLOCE_DPS_KLOC"] = {
+    text = "%s byl ostatnim DPS (%s) — reszta robila >=2x tyle.\nDodac do klocow?",
+    button1 = "Tak",
+    button2 = "Nie",
+    OnAccept = function(self, data) if data then AddKloce(data) end end,
+    timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 }
 
 StaticPopupDialogs["GIGAKLOCE_CLEARTOMB"] = {

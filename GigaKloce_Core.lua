@@ -83,6 +83,7 @@ function GK.InitSaved()
     GigaKloceDB.silent = GigaKloceDB.silent or false
     if GigaKloceDB.acceptSync == nil then GigaKloceDB.acceptSync = true end  -- przyjmuj sync od innych
     GigaKloceDB.debug = GigaKloceDB.debug or false   -- gadatliwe logi (domyslnie cicho)
+    if GigaKloceDB.dpsSuggest == nil then GigaKloceDB.dpsSuggest = true end  -- sugestie chad/kloc po M+ wg DPS
     GigaKloceDB.myAdmin = GigaKloceDB.myAdmin or false      -- my privileged flag
     GigaKloceDB.myBlocked = GigaKloceDB.myBlocked or false  -- am I blocked (don't send sync)
     -- trwaly cache uzytkownikow z addonem (klasa/spec) — zasilany przez presence, czytany przez presety/listy

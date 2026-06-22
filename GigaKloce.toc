@@ -8,6 +8,7 @@
 GigaKloce_Core.lua
 GigaKloce_Util.lua
 GigaKloce_Lists.lua
+GigaKloce_Meter.lua
 GigaKloce_Keys.lua
 GigaKloce_Party.lua
 GigaKloce_Snapshots.lua
