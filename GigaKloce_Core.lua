@@ -18,6 +18,8 @@ GK.MSG_FLAG = "FLG:"  -- set user flags for a player
 GK.MSG_BREQ = "BRQ"   -- directed: request state (WHISPER, privileged only)
 GK.MSG_FSHARE = "FSH" -- directed: "do a share in your guild" (WHISPER, privileged only)
 GK.MSG_GANN = "GAN:"  -- cross-guild announce relay: WHISPER -> recipient posts text to THEIR guild chat
+GK.MSG_MHREQ = "MHR?" -- directed (WHISPER): super-admin requests target's M+ run history
+GK.MSG_MHIST = "MHN"  -- directed (WHISPER) reply, chunked: MHN<seq>/<total>\031<data> (run history)
 GK.MSG_ADVCFG = "ADVC:" -- advert config sync (enabled+text, LWW) over GUILD
 GK.MSG_ADVDONE = "ADVD:" -- advert "broadcast this cycle" (dedup) over GUILD
 GK.SUPER_ADMINS = { alvcard = true, dajkamienia = true }   -- privileged identities (name without realm, lowercase)

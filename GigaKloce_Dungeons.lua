@@ -297,3 +297,152 @@ function GK.DungeonsWithHistory()
     table.sort(out, function(a, b) return (a.lastWhen or 0) > (b.lastWhen or 0) end)
     return out
 end
+
+-- ============================
+-- PRZESYL HISTORII RUNOW (super-admin: whisper request -> chunked reply). U ODBIORCY ULOTNE.
+-- Serializacja: runy rozdzielone RS; pola runa rozdzielone US; gracze GS; podpola gracza ",".
+-- ============================
+local RS, US, GS = "\030", "\031", "\029"
+local remoteRuns = {}   -- [normName] = { byIdx = {[idx]={run,...}}, when, name }
+
+local function serializeHistory()
+    local rh = GigaKloceDB and GigaKloceDB.runHistory
+    if not rh then return "" end
+    local runs = {}
+    for idx, h in pairs(rh) do
+        if type(h) == "table" then
+            for _, run in ipairs(h) do
+                local pls = {}
+                for _, p in ipairs(run.players or {}) do
+                    pls[#pls + 1] = table.concat({
+                        (tostring(p.name or "")):gsub("[,%z\029\030\031]", " "),
+                        p.class or "",
+                        math.floor((p.dmg or 0) + 0.5),
+                        p.pct or "",
+                        p.isSelf and "1" or "",
+                    }, ",")
+                end
+                runs[#runs + 1] = table.concat({
+                    idx, run.level or 0, run.timed and "1" or "0",
+                    math.floor(run.dur or 0), run.when or 0, run.myRole or "",
+                    table.concat(pls, GS),
+                }, US)
+            end
+        end
+    end
+    return table.concat(runs, RS)
+end
+
+local function deserializeHistory(payload)
+    local byIdx = {}
+    if not payload or payload == "" then return byIdx end
+    for runStr in (payload .. RS):gmatch("(.-)" .. RS) do
+        if runStr ~= "" then
+            local idx, level, timed, dur, when, role, plsStr =
+                runStr:match("^(.-)" .. US .. "(.-)" .. US .. "(.-)" .. US .. "(.-)" .. US .. "(.-)" .. US .. "(.-)" .. US .. "(.*)$")
+            idx = tonumber(idx)
+            if idx then
+                local players = {}
+                if plsStr and plsStr ~= "" then
+                    for pStr in (plsStr .. GS):gmatch("(.-)" .. GS) do
+                        if pStr ~= "" then
+                            local nm, cls, dmg, pct, slf = pStr:match("^(.-),(.-),(.-),(.-),(.*)$")
+                            players[#players + 1] = {
+                                name = nm, class = (cls and cls ~= "" and cls) or nil,
+                                dmg = tonumber(dmg) or 0, pct = tonumber(pct),
+                                isSelf = (slf == "1") or nil,
+                            }
+                        end
+                    end
+                end
+                local h = byIdx[idx]; if not h then h = {}; byIdx[idx] = h end
+                h[#h + 1] = {
+                    level = tonumber(level) or 0, timed = (timed == "1"),
+                    dur = tonumber(dur) or 0, when = tonumber(when) or 0,
+                    myRole = (role and role ~= "" and role) or nil, players = players,
+                }
+            end
+        end
+    end
+    return byIdx
+end
+
+-- Odpowiedz na MHR? — wyslij swoja historie w kawalkach (zawsze min. 1, by pytajacy nie czekal w nieskonczonosc).
+function GK.SendMHist(target)
+    if not target or target == "" then return end
+    local payload = serializeHistory()
+    local CHUNK = 200
+    local total = math.max(1, math.ceil(#payload / CHUNK))
+    for seq = 1, total do
+        local data = payload:sub((seq - 1) * CHUNK + 1, seq * CHUNK)
+        if GK.Send then GK.Send(GK.MSG_MHIST .. seq .. "/" .. total .. US .. data, "WHISPER", target) end
+    end
+end
+
+local mhBuf = {}   -- [normSender] = { total, parts = {}, count, t }
+
+-- Odbior kawalka "MHN<seq>/<total>\031<data>"; po komplecie -> deserializacja + okno.
+function GK.ReceiveMHist(sender, msg)
+    local body = msg:sub(#GK.MSG_MHIST + 1)          -- po "MHN"
+    local header, data = body:match("^(.-)" .. US .. "(.*)$")
+    if not header then return end
+    local seq, total = header:match("^(%d+)/(%d+)$")
+    seq, total = tonumber(seq), tonumber(total)
+    if not seq or not total or total < 1 then return end
+    local k = normalizeName(sender)
+    local buf = mhBuf[k]
+    if seq == 1 or not buf or buf.total ~= total then
+        buf = { total = total, parts = {}, count = 0, t = GetTime() }
+        mhBuf[k] = buf
+        C_Timer.After(30, function()
+            if mhBuf[k] == buf and buf.count < buf.total then mhBuf[k] = nil end   -- porzuc niekompletny
+        end)
+    end
+    if not buf.parts[seq] then
+        buf.parts[seq] = data or ""
+        buf.count = buf.count + 1
+    end
+    if buf.count >= buf.total then
+        mhBuf[k] = nil
+        remoteRuns[k] = { byIdx = deserializeHistory(table.concat(buf.parts)), when = GetTime(), name = displayName(sender) }
+        if ShowRunsWindow then ShowRunsWindow(nil, sender, false) end   -- otworz/odswiez okno dla tego ownera
+    end
+end
+
+-- Wyslij prosbe i otworz okno w stanie "czekam" (super-admin -> klik w menu).
+function GK.RequestMHist(who)
+    if not who or who == "" then return end
+    if normalizeName(who) == normalizeName(GetUnitFullName("player")) then
+        if ShowRunsWindow then ShowRunsWindow() end   -- to ja -> lokalna historia
+        return
+    end
+    remoteRuns[normalizeName(who)] = nil   -- wyczysc stare dane -> okno pokaze "Requesting..."
+    if GK.Send then GK.Send(GK.MSG_MHREQ, "WHISPER", who) end
+    if GK.out then GK.out("Requesting M+ history from " .. displayName(who) .. " ...") end
+    if ShowRunsWindow then ShowRunsWindow(nil, who, true) end
+end
+
+-- ===== Odczyt dla UI: lokalny (owner=nil) albo zdalny (owner=nick) =====
+function GK.HasRemoteRuns(owner)
+    return (owner ~= nil) and (remoteRuns[normalizeName(owner)] ~= nil)
+end
+
+function GK.RunHistoryOfOwner(owner, idx)
+    if not owner then return GK.RunHistoryOf(idx) end
+    local r = remoteRuns[normalizeName(owner)]
+    return r and r.byIdx and r.byIdx[idx]
+end
+
+function GK.DungeonsWithHistoryOf(owner)
+    if not owner then return GK.DungeonsWithHistory() end
+    local out = {}
+    local r = remoteRuns[normalizeName(owner)]
+    if not r or not r.byIdx then return out end
+    for idx, h in pairs(r.byIdx) do
+        if type(h) == "table" and #h > 0 then
+            out[#out + 1] = { idx = idx, name = GK.MPLUS_DUNGEONS[idx] or ("#" .. idx), count = #h, lastWhen = h[1].when or 0 }
+        end
+    end
+    table.sort(out, function(a, b) return (a.lastWhen or 0) > (b.lastWhen or 0) end)
+    return out
+end

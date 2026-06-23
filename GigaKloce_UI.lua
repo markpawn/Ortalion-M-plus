@@ -443,7 +443,7 @@ local function BuildRunsFrame()
     dd:SetPoint("TOPLEFT", 4, -28)
     UIDropDownMenu_SetWidth(dd, 230)
     UIDropDownMenu_Initialize(dd, function(self, level)
-        local list = (GK.DungeonsWithHistory and GK.DungeonsWithHistory()) or {}
+        local list = (GK.DungeonsWithHistoryOf and GK.DungeonsWithHistoryOf(f.owner)) or {}
         if #list == 0 then
             local none = UIDropDownMenu_CreateInfo()
             none.text = "|cff888888(no runs recorded yet)|r"; none.notCheckable = true; none.disabled = true
@@ -473,8 +473,19 @@ local function BuildRunsFrame()
     f.body = body; f.content = content
 
     function f.RefreshAll()
+        local owner = f.owner
+        -- stan oczekiwania/timeout dla zdalnego ownera (zanim przyjda dane)
+        if owner and not (GK.HasRemoteRuns and GK.HasRemoteRuns(owner)) then
+            if f.timedOut then
+                body:SetText("|cffff5555No response from " .. displayName(owner) .. ".|r\n|cff888888(offline or addon not updated)|r")
+            else
+                body:SetText("|cffffd200Requesting M+ history from " .. displayName(owner) .. "…|r")
+            end
+            content:SetHeight((body:GetStringHeight() or 1) + 8)
+            return
+        end
         local idx = f.idx
-        local h = idx and GK.RunHistoryOf and GK.RunHistoryOf(idx)
+        local h = idx and GK.RunHistoryOfOwner and GK.RunHistoryOfOwner(owner, idx)
         local lines = {}
         local function add(s) lines[#lines + 1] = s end
         if not h or #h == 0 then
@@ -482,8 +493,8 @@ local function BuildRunsFrame()
         else
             for ri, run in ipairs(h) do
                 local roleNote = ""
-                if run.myRole == "HEALER" then roleNote = "  |cff66ccff(you healed)|r"
-                elseif run.myRole == "TANK" then roleNote = "  |cffffcc66(you tanked)|r" end
+                if run.myRole == "HEALER" then roleNote = owner and "  |cff66ccff(healer)|r" or "  |cff66ccff(you healed)|r"
+                elseif run.myRole == "TANK" then roleNote = owner and "  |cffffcc66(tank)|r" or "  |cffffcc66(you tanked)|r" end
                 add(string.format("|cffffd200#%d|r %s%s  |cffffffff%s|r  |cff888888%s|r%s",
                     ri, keyLevelColored(run.level),
                     (run.timed and " |cff40ff40*|r" or ""), rdur(run.dur), rwhen(run.when), roleNote))
@@ -503,10 +514,15 @@ local function BuildRunsFrame()
     return f
 end
 
-function ShowRunsWindow(idx)
+-- owner = nil -> lokalna historia (ja); owner = nick -> zdalna (super-admin). waiting -> stan "czekam".
+function ShowRunsWindow(idx, owner, waiting)
     local f = BuildRunsFrame()
+    f.owner = owner
+    f.waiting = waiting and true or false
+    f.timedOut = false
+    f.title:SetText(owner and ("M+ runs: " .. displayName(owner)) or "M+ run history (local)")
     if not idx then
-        local list = (GK.DungeonsWithHistory and GK.DungeonsWithHistory()) or {}
+        local list = (GK.DungeonsWithHistoryOf and GK.DungeonsWithHistoryOf(owner)) or {}
         idx = list[1] and list[1].idx or nil
     end
     f.idx = idx
@@ -514,6 +530,15 @@ function ShowRunsWindow(idx)
     UIDropDownMenu_SetText(f.dd, nm or "(select dungeon)")
     f.RefreshAll()
     f:Show()
+    if owner and waiting then
+        local token = {}; f._waitToken = token
+        C_Timer.After(15, function()
+            if f._waitToken == token and f.waiting and not (GK.HasRemoteRuns and GK.HasRemoteRuns(owner)) then
+                f.timedOut = true
+                if f:IsShown() then f.RefreshAll() end
+            end
+        end)
+    end
 end
 
 -- ============================
@@ -725,6 +750,8 @@ local function CreateKloceUI()
                 extra[#extra + 1] = { text = "|cffffd200Force their guild-share|r", notCheckable = true,
                     func = function() if GK.Send then GK.Send(GK.MSG_FSHARE, "WHISPER", who) end
                         GK.out("Asked " .. displayName(who) .. " to share.") end }
+                extra[#extra + 1] = { text = "|cff00ff96View detailed M+|r", notCheckable = true,
+                    func = function() if GK.RequestMHist then GK.RequestMHist(who) end end }
             end
         end
         -- Kick: tylko gdy w mojej grupie, jestem liderem/asystentem i to nie ja

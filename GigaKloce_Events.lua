@@ -383,6 +383,14 @@ f:SetScript("OnEvent", function(self, event, ...)
             if GK.IsSuperAdmin and GK.IsSuperAdmin(sender) and GK.ShareAll then GK.ShareAll() end
             return
         end
+        if msg:sub(1, 4) == GK.MSG_MHREQ then   -- "MHR?" — super-admin requests my M+ history -> reply (chunked) via whisper
+            if GK.IsSuperAdmin and GK.IsSuperAdmin(sender) and GK.SendMHist then GK.SendMHist(sender) end
+            return
+        end
+        if msg:sub(1, 3) == GK.MSG_MHIST then   -- "MHN..." — chunk of someone's M+ history (reply to my request)
+            if GK.ReceiveMHist then GK.ReceiveMHist(sender, msg) end
+            return
+        end
         if msg:sub(1, 4) == MSG_FLAG then   -- "FLG:" — set flags for a player
             if not (channel ~= "WHISPER" and GK.VersionBad and GK.VersionBad(sender)) and GK.ApplyFlag then GK.ApplyFlag(sender, msg:sub(5)) end
             return
