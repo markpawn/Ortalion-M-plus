@@ -498,11 +498,20 @@ local function BuildRunsFrame()
                 add(string.format("|cffffd200#%d|r %s%s  |cffffffff%s|r  |cff888888%s|r%s",
                     ri, keyLevelColored(run.level),
                     (run.timed and " |cff40ff40*|r" or ""), rdur(run.dur), rwhen(run.when), roleNote))
+                local dur = run.dur or 0
                 for _, p in ipairs(run.players or {}) do
                     local mark = p.isSelf and "|cffffd200» |r" or "    "
                     local cls = p.class and (" |cff888888(" .. (classLocName(p.class)) .. ")|r") or ""
-                    local pct = p.pct and ("  " .. p.pct .. "%") or ""
-                    add(mark .. nameColored(p.name, p.class) .. cls .. "   |cffcccccc" .. rnum(p.dmg) .. "|r" .. pct)
+                    -- DPS i HPS liczone z dmg/heal i czasu runa (jednolicie: lokalnie i zdalnie)
+                    local dps = p.dps or ((dur > 0) and math.floor((p.dmg or 0) / dur + 0.5)) or 0
+                    local hps = p.hps or ((dur > 0) and math.floor((p.heal or 0) / dur + 0.5)) or 0
+                    local role = p.role or "DAMAGER"
+                    local roleTag = (role == "HEALER" and "|cff66ccffH|r ") or (role == "TANK" and "|cffffcc66T|r ") or ""
+                    local dpsStr = "|cffff8866" .. rnum(dps) .. " dps|r" .. (p.pct and (" " .. p.pct .. "%") or "")
+                    local hpsStr = "|cff66ccff" .. rnum(hps) .. " hps|r"
+                    -- rola-zalezna kolejnosc: healer/tank pokazuja HPS jako pierwsze
+                    local stats = (role == "DAMAGER") and (dpsStr .. "  ·  " .. hpsStr) or (hpsStr .. "  ·  " .. dpsStr)
+                    add(mark .. roleTag .. nameColored(p.name, p.class) .. cls .. "   " .. stats)
                 end
                 add(" ")
             end

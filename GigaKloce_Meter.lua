@@ -127,12 +127,12 @@ end
 local function isAddonUser(k) return GK.addonUsers and GK.addonUsers[k] ~= nil end
 
 -- ============================
--- RANKING DPS (rola DAMAGER) wg delty obrazen vs baseline.
--- Zwraca: ranked, meter, dur. ranked = posortowana malejaco lista { key, name, dmg, heal },
--- zawiera WSZYSTKICH DPS-ow (tez nas, userow z addonem, osoby z list) — filtrowanie kandydatow
--- robi dopiero logika sugestii. Zwraca nil gdy poza grupa albo brak metra.
+-- PELNA LISTA CZLONKOW grupy z delta dmg+heal + rola. Zwraca: members, meter, dur.
+-- members = { { key, name, role, dmg, heal }, ... } dla CALEJ grupy (tank/heal tez).
+-- role: UnitGroupRolesAssigned; przy NONE/nieznanej -> HEALER gdy heal>dmg, inaczej DAMAGER.
+-- Zwraca nil gdy poza grupa albo brak metra.
 -- ============================
-function GK.MeterRankNow()
+function GK.MeterMembersNow()
     if not IsInGroup() then return nil end
     local now, meter = ReadCumulative()
     if not now then return nil end
@@ -146,29 +146,41 @@ function GK.MeterRankNow()
         return { dmg = math.max(0, (cur.dmg or 0) - bd), heal = math.max(0, (cur.heal or 0) - bh) }
     end
 
-    -- Tylko rola DAMAGER (tank/healer pomijamy). Gdy rola NONE/nieznana:
-    -- heurystyka z metra — traktuj jak nie-DPS, gdy leczenie dominuje nad obrazeniami.
-    local ranked = {}
+    local members = {}
     for i = 1, GetNumGroupMembers() do
         local unit, name = RosterUnitName(i)
         if unit and name then
             local k = normalizeName(name)
             local d = delta(k)
             if d then
-                local role = UnitGroupRolesAssigned and UnitGroupRolesAssigned(unit) or "NONE"
-                local isDps = (role == "DAMAGER")
+                local role = (UnitGroupRolesAssigned and UnitGroupRolesAssigned(unit)) or "NONE"
                 if role == "NONE" or role == "" then
-                    isDps = (d.dmg >= d.heal)   -- heurystyka: leczenie dominuje => nie DPS
+                    role = (d.heal > d.dmg) and "HEALER" or "DAMAGER"   -- heurystyka z metra
                 end
-                if isDps then
-                    ranked[#ranked + 1] = { key = k, name = name, dmg = d.dmg, heal = d.heal }
-                end
+                members[#members + 1] = { key = k, name = name, role = role, dmg = d.dmg, heal = d.heal }
             end
         end
     end
-
-    table.sort(ranked, function(a, b) return a.dmg > b.dmg end)
     local dur = baseline and (GetTime() - baseline.stamp) or 0
+    return members, meter, dur
+end
+
+-- ============================
+-- RANKING DPS (rola DAMAGER) wg delty obrazen vs baseline.
+-- Zwraca: ranked, meter, dur. ranked = posortowana malejaco lista { key, name, dmg, heal },
+-- zawiera WSZYSTKICH DPS-ow (tez nas, userow z addonem, osoby z list) — filtrowanie kandydatow
+-- robi dopiero logika sugestii. Zwraca nil gdy poza grupa albo brak metra.
+-- ============================
+function GK.MeterRankNow()
+    local members, meter, dur = GK.MeterMembersNow()
+    if not members then return nil end
+    local ranked = {}
+    for _, m in ipairs(members) do
+        if m.role == "DAMAGER" then
+            ranked[#ranked + 1] = { key = m.key, name = m.name, dmg = m.dmg, heal = m.heal }
+        end
+    end
+    table.sort(ranked, function(a, b) return a.dmg > b.dmg end)
     return ranked, meter, dur
 end
 

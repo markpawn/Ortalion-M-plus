@@ -113,20 +113,25 @@ function GK.RecordCompletedRun()
     md.bestTimed = md.bestTimed or {}
     local when = (GK.now and GK.now()) or time()
 
-    local ranked, rmeter, mdur
-    if GK.MeterRankNow then ranked, rmeter, mdur = GK.MeterRankNow() end
+    local members, rmeter, mdur
+    if GK.MeterMembersNow then members, rmeter, mdur = GK.MeterMembersNow() end
     local dur = durSec or mdur or 0
+    members = members or {}
 
-    -- ostatni przebieg + moj % dmg (top = 100%), liczony z metra przez ranking z Part 1
+    -- top dmg wsrod DPS-ow (DAMAGER) = baza dla %; meKey do oznaczenia siebie
+    local meKey = normalizeName(GetUnitFullName("player"))
+    local topDps = 0
+    for _, m in ipairs(members) do if m.role == "DAMAGER" and (m.dmg or 0) > topDps then topDps = m.dmg end end
+
+    -- ostatni przebieg + moj % dmg (top DPS = 100%)
     md.lastIdx = idx or 0
     md.lastLvl = level
     md.lastTimed = timed and true or false
     md.lastWhen = when
     md.lastPct = nil
-    if ranked and ranked[1] and ranked[1].dmg > 0 then
-        local meKey = normalizeName(GetUnitFullName("player"))
-        for _, p in ipairs(ranked) do
-            if p.key == meKey then md.lastPct = math.floor(p.dmg / ranked[1].dmg * 100 + 0.5); break end
+    if topDps > 0 then
+        for _, m in ipairs(members) do
+            if m.key == meKey and m.role == "DAMAGER" then md.lastPct = math.floor(m.dmg / topDps * 100 + 0.5); break end
         end
     end
 
@@ -136,8 +141,31 @@ function GK.RecordCompletedRun()
         md.bestTimed[idx] = timed and true or false
     end
 
+    -- pelna piatka: dmg+dps ORAZ heal+hps + rola (DPS-y, healerzy, tank). Posortowane do wyswietlenia.
+    local players = {}
+    for _, m in ipairs(members) do
+        players[#players + 1] = {
+            name = GK.displayName and GK.displayName(m.name) or m.name,
+            class = (GK.ClassOf and GK.ClassOf(m.name)) or nil,
+            spec = (GK.SpecOf and GK.SpecOf(m.name)) or nil,
+            role = m.role,
+            dmg = m.dmg or 0, dps = (dur > 0) and math.floor((m.dmg or 0) / dur + 0.5) or nil,
+            heal = m.heal or 0, hps = (dur > 0) and math.floor((m.heal or 0) / dur + 0.5) or nil,
+            pct = (topDps > 0 and m.role == "DAMAGER") and math.floor((m.dmg or 0) / topDps * 100 + 0.5) or nil,
+            isSelf = (m.key == meKey) or nil,
+        }
+    end
+    -- kolejnosc: DAMAGER wg dmg desc, potem HEALER wg heal desc, potem TANK
+    local ROLE_ORDER = { DAMAGER = 1, HEALER = 2, TANK = 3 }
+    table.sort(players, function(a, b)
+        local ra, rb = ROLE_ORDER[a.role] or 9, ROLE_ORDER[b.role] or 9
+        if ra ~= rb then return ra < rb end
+        if a.role == "HEALER" or a.role == "TANK" then return (a.heal or 0) > (b.heal or 0) end
+        return (a.dmg or 0) > (b.dmg or 0)
+    end)
+
     -- LOKALNA historia: ostatnie 10 runow per podziemie (NIE wysylane nigdzie)
-    GK.PushRunHistory(idx, level, timed, dur, ranked)
+    GK.PushRunHistoryPlayers(idx, level, timed, dur, players)
 
     if GK.BroadcastDungeons then GK.BroadcastDungeons() end
     if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
@@ -246,35 +274,22 @@ end
 -- ============================
 -- LOKALNA HISTORIA RUNOW (tylko nasz klient; NIE wysylana kanalem)
 -- GigaKloceDB.runHistory[idx] = { run, run, ... } newest-first, max 10.
--- run = { when, level, timed, dur, myRole, players = { {name,class,spec,dmg,dps,pct,isSelf}, ... } }
--- players = tylko DPS (ranking DAMAGER) — zawiera nas, gdy gramy DPS.
+-- run = { when, level, timed, dur, myRole, players = { {name,class,spec,role,dmg,dps,heal,hps,pct,isSelf}, ... } }
+-- players = CALA piatka (DPS + healer + tank), juz posortowana przez RecordCompletedRun.
 -- ============================
 local HISTORY_MAX = 10
 
-function GK.PushRunHistory(idx, level, timed, dur, ranked)
+-- players: gotowa, posortowana lista rekordow graczy (budowana w RecordCompletedRun).
+function GK.PushRunHistoryPlayers(idx, level, timed, dur, players)
     if not idx or idx == 0 then return end
     GigaKloceDB.runHistory = GigaKloceDB.runHistory or {}
     local h = GigaKloceDB.runHistory[idx]
     if not h then h = {}; GigaKloceDB.runHistory[idx] = h end
-    local top = (ranked and ranked[1] and ranked[1].dmg) or 0
-    local meKey = normalizeName(GetUnitFullName("player"))
-    local players = {}
-    for _, p in ipairs(ranked or {}) do
-        players[#players + 1] = {
-            name = displayName(p.name),
-            class = (GK.ClassOf and GK.ClassOf(p.name)) or nil,
-            spec = (GK.SpecOf and GK.SpecOf(p.name)) or nil,
-            dmg = p.dmg,
-            dps = (dur > 0) and math.floor((p.dmg or 0) / dur + 0.5) or nil,
-            pct = (top > 0) and math.floor((p.dmg or 0) / top * 100 + 0.5) or nil,
-            isSelf = (p.key == meKey) or nil,
-        }
-    end
     table.insert(h, 1, {
         when = (GK.now and GK.now()) or time(),
         level = level, timed = timed and true or false, dur = dur,
         myRole = (UnitGroupRolesAssigned and UnitGroupRolesAssigned("player")) or nil,
-        players = players,
+        players = players or {},
     })
     for i = #h, HISTORY_MAX + 1, -1 do table.remove(h, i) end
 end
@@ -320,6 +335,8 @@ local function serializeHistory()
                         math.floor((p.dmg or 0) + 0.5),
                         p.pct or "",
                         p.isSelf and "1" or "",
+                        p.role or "",
+                        math.floor((p.heal or 0) + 0.5),
                     }, ",")
                 end
                 runs[#runs + 1] = table.concat({
@@ -346,11 +363,18 @@ local function deserializeHistory(payload)
                 if plsStr and plsStr ~= "" then
                     for pStr in (plsStr .. GS):gmatch("(.-)" .. GS) do
                         if pStr ~= "" then
-                            local nm, cls, dmg, pct, slf = pStr:match("^(.-),(.-),(.-),(.-),(.*)$")
+                            -- format Part4: name,class,dmg,pct,self,role,heal ; starszy (Part3): name,class,dmg,pct,self
+                            local nm, cls, dmg, pct, slf, role, heal =
+                                pStr:match("^(.-),(.-),(.-),(.-),(.-),(.-),(.*)$")
+                            if not nm then   -- fallback na stary 5-polowy format
+                                nm, cls, dmg, pct, slf = pStr:match("^(.-),(.-),(.-),(.-),(.*)$")
+                            end
                             players[#players + 1] = {
                                 name = nm, class = (cls and cls ~= "" and cls) or nil,
                                 dmg = tonumber(dmg) or 0, pct = tonumber(pct),
                                 isSelf = (slf == "1") or nil,
+                                role = (role and role ~= "" and role) or nil,
+                                heal = tonumber(heal) or 0,
                             }
                         end
                     end
