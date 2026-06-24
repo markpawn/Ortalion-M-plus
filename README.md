@@ -50,6 +50,28 @@ W menu zębatki: **Reparty** (lider rozwala i odbudowuje skład — osobom z add
 
 ---
 
+## 📊 M+ wyniki (DPS / HPS)
+
+Addon czyta dane z Twojego **damage metra** — **Details!**, **Skada** albo **Recount** (kolejność wykrywania; działa ten, który masz). Nic nie instaluje za Ciebie — bez metra wyłączone są tylko liczby DPS/HPS, reszta działa.
+
+### 🤖 Sugestie Kloc / Chad po dungu
+Po **ukończeniu Mythic+** (`CHALLENGE_MODE_COMPLETED`) addon liczy wkład każdego DPS-a w danym przebiegu i **proponuje** (popup Tak/Nie — nic nie dodaje samo):
+- **top DPS → Chad**, gdy zrobił **> 110%** drugiego,
+- **ostatni DPS → Kloc**, gdy osoba nad nim zrobiła **≥ 2×** tyle.
+
+Pod uwagę brani są **tylko DPS-i** (rola DAMAGER) — tank i healer nigdy nie wpadną do propozycji. Pomijane są też osoby **z addonem**, **Ty sam** i ktoś **już na liście**.
+- `/kloce dps` — włącz/wyłącz sugestie.
+- `/kloce dps now` — podgląd rankingu DPS „na teraz" (do testów, bez kończenia dunga).
+
+### 🗝️ M+ stats per gracz
+Każdy z addonem **sam rozsyła** swoje statystyki M+ (osobny event `D`): **najlepszy klucz dla każdego z 14 podziemi Legionu** + ostatni przebieg z **% obrażeń** (top = 100%).
+- W **Active**: przy nicku mały tag `H:+N` (najwyższy klucz), a **lewy klik** na osobie (gdy panel *Preset* jest schowany) otwiera okno **„M+ stats"** — klasa/spec, ilvl, strefa, najlepsze klucze i ostatni run.
+
+### 📜 Historia runów (lokalnie)
+`/kloce runs` — okno z **10 ostatnimi przebiegami każdego podziemia**. Dla każdego runu: poziom klucza, czy w czasie, długość, data oraz **cała piątka** z rolą i metrykami: **DPS i HPS** (healer/tank też). To dane **czysto lokalne** — nie są nigdzie rozsyłane.
+
+---
+
 ## 🔄 Synchronizacja (cross-guild)
 Tauri **nie przepuszcza addon-message po custom kanale**, więc transport jest podzielony:
 
@@ -57,13 +79,14 @@ Tauri **nie przepuszcza addon-message po custom kanale**, więc transport jest p
 |---|---|---|
 | **Listy** Kloce/Chady/detale/gildie | kanał gildii (addon) | w obrębie gildii |
 | **Presence + klucze + strefa + skład drużyny** | wspólny, ukryty kanał czatu `OrtalionMplusSync` | **cross-guild** |
+| **Statystyki M+** (best key per podziemie + ostatni run) | ten sam kanał czatu (event `D`) | **cross-guild** |
 
 W **Active** widać też ludzi z **innych gildii** (z nazwą gildii przy nicku). Synchronizacja list: **„ostatnia zmiana wygrywa"** ze znacznikami czasu i „nagrobkami" — **usunięcia nie wracają**.
 
 - **Accept sync from others** (zębatka) — wyłącza przyjmowanie zmian od innych.
 
 ## 🧬 Wersjonowanie danych (`DATA_VERSION = 4`)
-Sync **list** przyjmowany tylko od **zgodnej wersji**. Nowe pola (strefa, skład drużyny) są **dodatkowe** — starsze klienty v4.x je ignorują, więc v4.x są **wzajemnie zgodne**. Wersja widoczna przy nickach — **czerwona = nieaktualny klient**. Po update **wszyscy robią `/reload` razem**.
+Sync **list** przyjmowany tylko od **zgodnej wersji**. Nowe rzeczy (strefa, skład drużyny, **statystyki M+ — event `D`**) są **dodatkowe** — starsze klienty v4.x je ignorują, więc v4.x są **wzajemnie zgodne**. Wersja widoczna przy nickach — **czerwona = nieaktualny klient**. Po update **wszyscy robią `/reload` razem**.
 
 ## 💾 Backup (snapshoty)
 Codzienny automatyczny backup (max 10, rolling) — Kloce, Chady, detale, gildie, presety. Przywracanie z zębatki → **Import snapshot**.
@@ -76,6 +99,9 @@ Codzienny automatyczny backup (max 10, rolling) — Kloce, Chady, detale, gildie
 | `/kloce show` | otwórz okno |
 | `/kloce add/remove <nick>` | dodaj/usuń kloca (lub na targecie) |
 | `/chad add/remove <nick>` | dodaj/usuń chada |
+| `/kloce dps` | włącz/wyłącz sugestie Kloc/Chad po M+ |
+| `/kloce dps now` | podgląd rankingu DPS „na teraz" |
+| `/kloce runs` | historia ostatnich 10 runów per podziemie (lokalnie) |
 | `/kloce guild add/remove/list <nazwa>` | blokowane gildie |
 | `/kloce reparty` | odbuduj skład (tylko lider) |
 | `/kloce share` | wypchnij wszystko do ekipy |
