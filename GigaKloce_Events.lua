@@ -200,6 +200,14 @@ SlashCmdList["KLOCE"] = function(msg)
     elseif cmd == "runs" then
         if ShowRunsWindow then ShowRunsWindow() else log("Run history UI unavailable.") end
 
+    elseif cmd == "emote" then         -- lokalny podglad: wrzuc klikalna miniaturke emotki do czatu
+        local name = (rest ~= "" and rest) or "ronaldo"
+        if GK.EMOTES and GK.EMOTES[name] and GK.EmoteChatLink then
+            DEFAULT_CHAT_FRAME:AddMessage(GK.EmoteChatLink(name))
+        else
+            log("Unknown emote: " .. tostring(name))
+        end
+
     else
         log("Usage: /kloce add, remove, list, show, reset, share, sync, syncfrom, guild, dps, runs | chads: /chad")
     end
@@ -582,6 +590,244 @@ GK_HookUnitFrame(TargetFrame, "target")
 GK_HookUnitFrame(FocusFrame, "focus")
 for i = 1, 4 do
     GK_HookUnitFrame(_G["PartyMemberFrame"..i], "party"..i)
+end
+
+-- ============================
+-- Chat-emoty: animowane gify w czacie. Token #nazwa w wiadomosci -> miniaturka (jedzie ze scrollem)
+-- + auto-odpalenie gifa nad czatem. Hover/klik miniaturki gra ponownie.
+-- Klatki: assets\gifs\<nazwa>\<nazwa>_00.blp .. (256x256), generowane przez tools/gif2blp.
+-- DODANIE EMOTKI: wrzuc gif do assets/raw_gifs/ i odpal tools/gif2blp -> nadpisze GigaKloce_Emotes.lua.
+-- Filtr dziala u ODBIORCY (nadawca moze byc bez addona). Animacja chodzi gdy WoW renderuje.
+-- ============================
+-- GK.EMOTES ladowane z GigaKloce_Emotes.lua (auto-generowane). Tu tylko fallback.
+GK.EMOTES = GK.EMOTES or {}
+
+local EMOTE_SIZE  = 220   -- rozmiar ramki na ekranie (px)
+local EMOTE_LOOPS = 2     -- ile petli, potem chowa sie sama
+local emoteFrames = {}    -- cache zbudowanych ramek [nazwa] = frame (preload klatek)
+local shownEmote          -- aktualnie grajaca ramka (tylko jedna naraz)
+
+local function emotePath(name, i)
+    return "Interface\\AddOns\\GigaKloce\\assets\\gifs\\" .. name .. "\\" .. name .. "_" .. string.format("%02d", i)
+end
+
+-- Buduj RAZ i pre-laduj wszystkie klatki jako nakladajace sie tekstury (alfa, nie Show/Hide) => brak flickera.
+local function ensureEmote(name)
+    local def = GK.EMOTES[name]
+    if not def then return nil end
+    if emoteFrames[name] then return emoteFrames[name] end
+    -- Rodzic = UIParent (NIE ChatFrame1), zeby nie chowac sie przy przelaczeniu zakladki czatu.
+    -- Kotwiczymy do pozycji docka (ChatFrame1) — to ten sam obszar dla kazdej zakladki.
+    local f = CreateFrame("Frame", nil, UIParent)
+    f:SetSize(EMOTE_SIZE, EMOTE_SIZE)
+    f:SetFrameStrata("DIALOG")
+    f:SetPoint("BOTTOMLEFT", ChatFrame1 or UIParent, "TOPLEFT", 0, 34)   -- nad oknem czatu (margines, by nie wchodzic na zakladki)
+    f.tex = {}
+    for i = 0, def.frames - 1 do
+        local t = f:CreateTexture(nil, "ARTWORK")
+        t:SetAllPoints(f)
+        t:SetTexture(emotePath(name, i))
+        t:Show(); t:SetAlpha(0)
+        f.tex[i] = t
+    end
+    f.n = def.frames
+    f.fps = def.fps or 10
+    f.cur = 0
+    f:Hide()
+    emoteFrames[name] = f
+    return f
+end
+
+local function stopEmote()
+    if shownEmote then shownEmote:SetScript("OnUpdate", nil); shownEmote:Hide(); shownEmote = nil end
+end
+
+local function startEmote(name)
+    local f = ensureEmote(name)
+    if not f then return end
+    stopEmote()
+    for i = 0, f.n - 1 do f.tex[i]:SetAlpha(0) end
+    f.cur = 0; f.tex[0]:SetAlpha(1)
+    local acc, loops, spf = 0, 0, 1 / f.fps
+    f:Show(); shownEmote = f
+    f:SetScript("OnUpdate", function(self, dt)
+        acc = acc + dt
+        if acc < spf then return end
+        acc = 0
+        self.tex[self.cur]:SetAlpha(0)
+        self.cur = self.cur + 1
+        if self.cur >= self.n then
+            self.cur = 0; loops = loops + 1
+            if loops >= EMOTE_LOOPS then
+                self:SetScript("OnUpdate", nil); self:Hide()
+                if shownEmote == self then shownEmote = nil end
+                return
+            end
+        end
+        self.tex[self.cur]:SetAlpha(1)
+    end)
+end
+GK.PlayEmote = startEmote
+
+local function toggleEmote(name)
+    local f = emoteFrames[name]
+    if f and f:IsShown() then stopEmote() else startEmote(name) end
+end
+
+-- Klikalna/hoverowalna MINIATURKA: obrazek owiniety w hyperlink (samo |T|t nie lapie myszki).
+function GK.EmoteChatLink(name)
+    return "|Hgigakloce:emote:" .. name .. "|h|T" .. emotePath(name, 0) .. ":24:24|t|h"
+end
+-- KLIK na miniaturce -> toggle
+hooksecurefunc("SetItemRef", function(link)
+    local name = link and link:match("^gigakloce:emote:([%w_%-]+)$")
+    if name and GK.EMOTES[name] then toggleEmote(name) end
+end)
+-- HOVER na miniaturce -> odpal (jesli nie gra)
+local function gkEmoteEnter(self, link)
+    local name = link and link:match("^gigakloce:emote:([%w_%-]+)$")
+    if name and GK.EMOTES[name] and not (emoteFrames[name] and emoteFrames[name]:IsShown()) then startEmote(name) end
+end
+for i = 1, (NUM_CHAT_WINDOWS or 10) do
+    local cf = _G["ChatFrame" .. i]
+    if cf then cf:HookScript("OnHyperlinkEnter", gkEmoteEnter) end
+end
+
+-- Filtr: zamien kazdy znany #token na miniaturke; auto-odpal (ostatni z wiadomosci).
+local function emoteChatFilter(self, event, msg, ...)
+    if not msg or not msg:find("#[%w_%-]") then return false end
+    local played
+    local newMsg = msg:gsub("#([%w_%-]+)", function(tok)
+        if GK.EMOTES[tok] then played = tok; return GK.EmoteChatLink(tok) end
+        return "#" .. tok
+    end)
+    if played then
+        local nm = played
+        C_Timer.After(0, function() startEmote(nm) end)
+        return false, newMsg, ...
+    end
+    return false
+end
+do
+    local CHAN = {
+        "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE",
+        "CHAT_MSG_GUILD", "CHAT_MSG_OFFICER",
+        "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER",
+        "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
+        "CHAT_MSG_INSTANCE_CHAT", "CHAT_MSG_INSTANCE_CHAT_LEADER",
+        "CHAT_MSG_WHISPER", "CHAT_MSG_WHISPER_INFORM", "CHAT_MSG_CHANNEL",
+    }
+    for _, e in ipairs(CHAN) do ChatFrame_AddMessageEventFilter(e, emoteChatFilter) end
+end
+
+-- ============================
+-- Podpowiedzi #emotek w edytce czatu: wpisujesz "#par" -> lista pasujacych (z miniaturka).
+-- Tab albo klik wstawia pelne "#nazwa ". Znika gdy slowo nie zaczyna sie od #.
+-- ============================
+do
+    local SUG_MAX, SUG_H = 6, 20
+    local sug = CreateFrame("Frame", "GigaKloceEmoteSuggest", UIParent)
+    sug:SetFrameStrata("TOOLTIP")
+    sug:Hide()
+    sug:SetBackdrop({
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 12,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    })
+    sug:SetBackdropColor(0, 0, 0, 0.92)
+    sug.box = nil          -- edytka, ktorej dotyczy
+    sug.rows = {}
+    sug.matches = {}
+    for i = 1, SUG_MAX do
+        local b = CreateFrame("Button", nil, sug)
+        b:SetHeight(SUG_H)
+        b:SetPoint("TOPLEFT", 4, -4 - (i - 1) * SUG_H)
+        b:SetPoint("TOPRIGHT", -4, -4 - (i - 1) * SUG_H)
+        b.hl = b:CreateTexture(nil, "HIGHLIGHT"); b.hl:SetAllPoints(); b.hl:SetColorTexture(1, 1, 1, 0.12)
+        b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        b.text:SetPoint("LEFT", 4, 0); b.text:SetJustifyH("LEFT")
+        b:SetScript("OnClick", function(self)
+            if sug.box and self.name then GK.AcceptEmoteSuggest(sug.box, self.name) end
+        end)
+        sug.rows[i] = b
+    end
+
+    local function hideSug() sug:Hide(); sug.box = nil; wipe(sug.matches) end
+
+    -- slowo zaczynajace sie od # tuz przed kursorem: zwraca (bytePos '#', partial) lub nil
+    local function tokenBeforeCursor(box)
+        local text = box:GetText() or ""
+        local cur = box:GetCursorPosition() or #text
+        local left = text:sub(1, cur)
+        local s, partial = left:match("()#([%w_%-]*)$")
+        return s, partial
+    end
+
+    local function updateSug(box)
+        if not box:HasFocus() then hideSug(); return end
+        local s, partial = tokenBeforeCursor(box)
+        if not s then hideSug(); return end
+        local pl = partial:lower()
+        wipe(sug.matches)
+        for name in pairs(GK.EMOTES or {}) do
+            if pl == "" or name:lower():find(pl, 1, true) == 1 then
+                sug.matches[#sug.matches + 1] = name
+            end
+        end
+        table.sort(sug.matches)
+        local n = math.min(#sug.matches, SUG_MAX)
+        if n == 0 then hideSug(); return end
+        for i, b in ipairs(sug.rows) do
+            local name = sug.matches[i]
+            if i <= n and name then
+                b.name = name
+                b.text:SetText("|T" .. emotePath(name, 0) .. ":18:18|t " .. name)
+                b:Show()
+            else
+                b.name = nil; b:Hide()
+            end
+        end
+        sug:SetHeight(8 + n * SUG_H)
+        sug:SetWidth(160)
+        sug:ClearAllPoints()
+        sug:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 0, 4)
+        sug.box = box
+        sug:Show()
+    end
+
+    -- wstaw "#nazwa " w miejsce wpisywanego #partial
+    function GK.AcceptEmoteSuggest(box, name)
+        local text = box:GetText() or ""
+        local cur = box:GetCursorPosition() or #text
+        local left = text:sub(1, cur)
+        local s = left:match("()#[%w_%-]*$")
+        if not s then return end
+        local newLeft = text:sub(1, s - 1) .. "#" .. name .. " "
+        box:SetText(newLeft .. text:sub(cur + 1))
+        box:SetCursorPosition(#newLeft)
+        hideSug()
+    end
+
+    -- podpiecie pod edytki czatu
+    for i = 1, (NUM_CHAT_WINDOWS or 10) do
+        local box = _G["ChatFrame" .. i .. "EditBox"]
+        if box then
+            box:HookScript("OnTextChanged", function(self) updateSug(self) end)
+            box:HookScript("OnEditFocusLost", function()
+                C_Timer.After(0.15, function() if not (sug.box and sug.box:HasFocus()) then hideSug() end end)
+            end)
+            -- Tab: gdy popup widoczny -> przyjmij pierwsza; inaczej domyslne zachowanie
+            local orig = box:GetScript("OnTabPressed")
+            box:SetScript("OnTabPressed", function(self)
+                if sug:IsShown() and sug.box == self and sug.matches[1] then
+                    GK.AcceptEmoteSuggest(self, sug.matches[1])
+                elseif orig then
+                    orig(self)
+                end
+            end)
+        end
+    end
 end
 
 -- ============================

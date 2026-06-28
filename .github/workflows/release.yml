@@ -31,6 +31,7 @@ jobs:
           git ls-files | while IFS= read -r f; do
             case "$f" in
               .github/*|.vscode/*|.gitignore|README.md|TODO.md|RELEASE_NOTES.md) continue ;;
+              tools/*|assets/raw_gifs/*) continue ;;   # narzedzie + zrodlowe gify nie ida do paczki
             esac
             mkdir -p "build/GigaKloce/$(dirname "$f")"
             cp "$f" "build/GigaKloce/$f"

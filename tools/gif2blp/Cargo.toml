@@ -1,0 +1,12 @@
+[package]
+name = "gif2blp"
+version = "0.1.0"
+edition = "2021"
+description = "GIF -> resized 256 BLP frame sequence for the GigaKloce addon"
+
+[dependencies]
+image = { version = "0.25", features = ["gif", "png"] }
+wow-blp = "0.6"
+
+[profile.release]
+opt-level = 3

@@ -53,7 +53,9 @@
         "UNKNOWN",
         "SendAddonMessage",
         "RegisterAddonMessagePrefix",
-        "GuildRoster"
+        "GuildRoster",
+        "UnitPopupMenus",
+        "ChatFrame1"
     ],
     "Lua.type.weakUnionCheck": true
 }
