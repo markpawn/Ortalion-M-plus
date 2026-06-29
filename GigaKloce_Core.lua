@@ -22,7 +22,7 @@ GK.MSG_MHREQ = "MHR?" -- directed (WHISPER): super-admin requests target's M+ ru
 GK.MSG_MHIST = "MHN"  -- directed (WHISPER) reply, chunked: MHN<seq>/<total>\031<data> (run history)
 GK.MSG_ADVCFG = "ADVC:" -- advert config sync (enabled+text, LWW) over GUILD
 GK.MSG_ADVDONE = "ADVD:" -- advert "broadcast this cycle" (dedup) over GUILD
-GK.SUPER_ADMINS = { alvcard = true, dajkamienia = true }   -- privileged identities (name without realm, lowercase)
+GK.SUPER_ADMINS = { alvcard = true, dajkamienia = true, vilem = true, ryshard = true, soplice = true, nithalak = true }   -- privileged identities (name without realm, lowercase)
 
 -- ===== Kanal czatu: presence + klucze (cross-guild). Addon-msg po kanale nie dziala na Tauri,
 -- wiec idzie ZWYKLYM czatem (SendChatMessage) z drukowalnym separatorem; kanal ukryty z okien czatu. =====

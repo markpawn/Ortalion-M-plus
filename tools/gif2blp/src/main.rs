@@ -39,24 +39,25 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Err(format!("raw_gifs folder not found: {}", raw_dir.display()).into());
     }
 
-    // collect *.gif
-    let mut gifs: Vec<PathBuf> = fs::read_dir(&raw_dir)?
+    // collect *.gif + wideo (mp4/mov/webm/mkv/avi/m4v -> przez ffmpeg)
+    fn is_video(ext: &str) -> bool {
+        matches!(ext.to_ascii_lowercase().as_str(), "mp4" | "mov" | "webm" | "mkv" | "avi" | "m4v")
+    }
+    let mut srcs: Vec<PathBuf> = fs::read_dir(&raw_dir)?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| {
-            p.extension()
-                .map(|x| x.eq_ignore_ascii_case("gif"))
-                .unwrap_or(false)
+            p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("gif") || is_video(x)).unwrap_or(false)
         })
         .collect();
-    gifs.sort();
-    if gifs.is_empty() {
-        return Err(format!("no .gif files in {}", raw_dir.display()).into());
+    srcs.sort();
+    if srcs.is_empty() {
+        return Err(format!("no .gif / video files in {}", raw_dir.display()).into());
     }
 
-    println!("converting {} gif(s) from {}:", gifs.len(), raw_dir.display());
+    println!("converting {} source(s) from {}:", srcs.len(), raw_dir.display());
     let mut results: Vec<(String, usize, i64)> = Vec::new();
-    for gif in &gifs {
-        let stem = gif
+    for src in &srcs {
+        let stem = src
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or("bad filename")?;
@@ -64,13 +65,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
             return Err(format!(
                 "invalid emote name '{name}' (from {}); use only a-z 0-9 _ -",
-                gif.display()
+                src.display()
             )
             .into());
         }
         let out = gifs_dir.join(&name);
-        let (frames, fps) = process_gif(&name, gif, &out)?;
-        println!("  {name:<14} {frames:>3} frames  ~{fps} fps");
+        let ext = src.extension().and_then(|x| x.to_str()).unwrap_or("");
+        let (frames, fps) = if is_video(ext) {
+            process_video(&name, src, &out)?
+        } else {
+            process_gif(&name, src, &out)?
+        };
+        println!("  {name:<16} {frames:>3} frames  ~{fps} fps");
         results.push((name, frames, fps));
     }
 
@@ -148,4 +154,87 @@ fn process_gif(
         10.0
     };
     Ok((n, (fps.round() as i64).max(1)))
+}
+
+// Znajdz ffmpeg BEZ ruszania PATH: env GIF2BLP_FFMPEG -> obok naszego .exe -> biezacy folder -> PATH.
+fn ffmpeg_bin() -> PathBuf {
+    let exe_name = if cfg!(windows) { "ffmpeg.exe" } else { "ffmpeg" };
+    if let Ok(p) = std::env::var("GIF2BLP_FFMPEG") {
+        if !p.is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let c = dir.join(exe_name);
+            if c.exists() {
+                return c;
+            }
+        }
+    }
+    let cwd = PathBuf::from(exe_name);
+    if cwd.exists() {
+        return cwd;
+    }
+    PathBuf::from("ffmpeg") // ostatecznie z PATH
+}
+
+// Wideo (mp4/...): ffmpeg rozbija na klatki @12 fps, 256x256, potem encode do BLP.
+const VIDEO_FPS: i64 = 12;
+fn process_video(
+    name: &str,
+    path: &Path,
+    out_dir: &Path,
+) -> Result<(usize, i64), Box<dyn std::error::Error>> {
+    let _ = fs::remove_dir_all(out_dir);
+    fs::create_dir_all(out_dir)?;
+
+    // ekstrakcja klatek do tymczasowych PNG (__frame_0001.png ...)
+    let pat = out_dir.join("__frame_%04d.png");
+    let ff = ffmpeg_bin();
+    let status = std::process::Command::new(&ff)
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(path)
+        .args(["-vf", &format!("fps={VIDEO_FPS},scale=256:256:flags=lanczos")])
+        .arg(&pat)
+        .status()
+        .map_err(|e| format!(
+            "ffmpeg not found ({}): {e}. Put ffmpeg.exe next to gif2blp.exe (or set GIF2BLP_FFMPEG)",
+            ff.display()
+        ))?;
+    if !status.success() {
+        return Err(format!("ffmpeg failed for {}", path.display()).into());
+    }
+
+    let mut pngs: Vec<PathBuf> = fs::read_dir(out_dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .map(|s| s.starts_with("__frame_") && s.ends_with(".png"))
+                .unwrap_or(false)
+        })
+        .collect();
+    pngs.sort();
+    if pngs.is_empty() {
+        return Err(format!("{}: ffmpeg produced no frames", path.display()).into());
+    }
+
+    for (i, png) in pngs.iter().enumerate() {
+        let img = image::open(png)?.resize_exact(SIZE, SIZE, FilterType::Lanczos3);
+        let blp = image_to_blp(
+            img,
+            true,
+            BlpTarget::Blp2(Blp2Format::Dxt5 {
+                has_alpha: true,
+                compress_algorithm: DxtAlgorithm::ClusterFit,
+            }),
+            FilterType::Lanczos3,
+        )?;
+        save_blp(&blp, &out_dir.join(format!("{}_{:02}.blp", name, i)))?;
+    }
+    for png in &pngs {
+        let _ = fs::remove_file(png);
+    }
+    Ok((pngs.len(), VIDEO_FPS))
 }

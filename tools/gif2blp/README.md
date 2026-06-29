@@ -1,9 +1,15 @@
 # gif2blp
 
-Tiny CLI that turns a **GIF** into a **256×256 BLP frame sequence** for the addon
-(`<name>_00.blp`, `_01.blp`, …). Built on the `wow-blp` + `image` crates — no GUI,
-no ffmpeg, no native DLL. The `image` crate decodes the GIF (frames + delays) and resizes;
-`wow-blp` encodes BLP2/DXT5.
+Tiny CLI that turns a **GIF or video (mp4/mov/webm/mkv/avi/m4v)** into a **256×256 BLP frame
+sequence** for the addon (`<name>_00.blp`, `_01.blp`, …). Built on `wow-blp` + `image`.
+- **GIF**: pure Rust (`image` decodes frames + delays, coalesces, resizes). No external deps.
+- **Video**: shells out to **ffmpeg** (`fps=12, scale=256`) to extract frames, then encodes BLP.
+  (WoW never plays video; we pre-extract to BLP frames.)
+
+### ffmpeg (only for video; no PATH edit needed)
+The tool finds ffmpeg in this order: env `GIF2BLP_FFMPEG` → **next to `gif2blp.exe`** → current folder → PATH.
+Easiest: drop **`ffmpeg.exe`** into `tools\gif2blp\target\release\` (next to `gif2blp.exe`). Done — no PATH changes.
+Alternatively per-run: `set GIF2BLP_FFMPEG=C:\path\to\ffmpeg.exe` before running.
 
 ## Build (once)
 1. Install Rust: https://rustup.rs  (gives `cargo`)
@@ -14,7 +20,7 @@ no ffmpeg, no native DLL. The `image` crate decodes the GIF (frames + delays) an
    Binary: `target/release/gif2blp` (`.exe` on Windows).
 
 ## Use (batch — fully automatic)
-1. Drop your GIFs into **`assets/raw_gifs/`** (filename = emote token, e.g. `ronaldo.gif` → `#ronaldo`).
+1. Drop your GIFs/videos into **`assets/raw_gifs/`** (filename = emote token, e.g. `ronaldo.gif`/`ronaldo.mp4` → `#ronaldo`).
 2. Run from the **addon root**:
    ```
    tools\gif2blp\target\release\gif2blp.exe

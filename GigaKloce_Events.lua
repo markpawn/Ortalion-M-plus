@@ -669,20 +669,20 @@ local function startEmote(name)
 end
 GK.PlayEmote = startEmote
 
-local function toggleEmote(name)
-    local f = emoteFrames[name]
-    if f and f:IsShown() then stopEmote() else startEmote(name) end
-end
-
 -- Klikalna/hoverowalna MINIATURKA: obrazek owiniety w hyperlink (samo |T|t nie lapie myszki).
 function GK.EmoteChatLink(name)
     return "|Hgigakloce:emote:" .. name .. "|h|T" .. emotePath(name, 0) .. ":24:24|t|h"
 end
--- KLIK na miniaturce -> toggle
-hooksecurefunc("SetItemRef", function(link)
-    local name = link and link:match("^gigakloce:emote:([%w_%-]+)$")
-    if name and GK.EMOTES[name] then toggleEmote(name) end
-end)
+-- KLIK na miniaturce: tylko POLKNIJ nasz link (hover wystarcza). Bez tego Blizzard/ElvUI probuje
+-- otworzyc nieznany typ linku -> "ItemRefTooltip:SetHyperlink(): Unknown link type". hooksecurefunc
+-- nie pomoze (oryginal odpala sie pierwszy), wiec OWIJAMY SetItemRef i wczesnie wychodzimy dla naszych.
+do
+    local _SetItemRef = SetItemRef
+    function SetItemRef(link, ...)
+        if type(link) == "string" and link:match("^gigakloce:emote:") then return end   -- nasz link: nic nie rob
+        return _SetItemRef(link, ...)
+    end
+end
 -- HOVER na miniaturce -> odpal (jesli nie gra)
 local function gkEmoteEnter(self, link)
     local name = link and link:match("^gigakloce:emote:([%w_%-]+)$")
@@ -771,11 +771,17 @@ do
         local pl = partial:lower()
         wipe(sug.matches)
         for name in pairs(GK.EMOTES or {}) do
-            if pl == "" or name:lower():find(pl, 1, true) == 1 then
+            if pl == "" or name:lower():find(pl, 1, true) then   -- CONTAINS (gdziekolwiek), nie tylko prefix
                 sug.matches[#sug.matches + 1] = name
             end
         end
-        table.sort(sug.matches)
+        table.sort(sug.matches, function(a, b)
+            if pl ~= "" then   -- trafienia od poczatku (prefix) na gore, reszta alfabetycznie
+                local pa, pb = (a:lower():find(pl, 1, true) == 1), (b:lower():find(pl, 1, true) == 1)
+                if pa ~= pb then return pa end
+            end
+            return a < b
+        end)
         local n = math.min(#sug.matches, SUG_MAX)
         if n == 0 then hideSug(); return end
         for i, b in ipairs(sug.rows) do
