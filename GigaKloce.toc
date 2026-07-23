@@ -7,6 +7,7 @@
 
 GigaKloce_Core.lua
 GigaKloce_Emotes.lua
+GigaKloce_Images.lua
 GigaKloce_Util.lua
 GigaKloce_Lists.lua
 GigaKloce_Meter.lua

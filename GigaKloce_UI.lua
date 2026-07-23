@@ -836,11 +836,11 @@ local function CreateKloceUI()
         if GK.AmIAdmin and GK.AmIAdmin() then
             table.insert(menu, #menu, { text = "", notCheckable = true, disabled = true })   -- separator
             table.insert(menu, #menu, { text = "Guild advert (Global)", isTitle = true, notCheckable = true })
-            table.insert(menu, #menu, { text = "Enabled", isNotRadio = true, keepShownOnClick = true,
+            table.insert(menu, #menu, { text = "Enabled (local)", isNotRadio = true, keepShownOnClick = true,
                 checked = function() return GK.GetAdvConfig and GK.GetAdvConfig().enabled end,
                 func = function()
                     local c = GK.GetAdvConfig and GK.GetAdvConfig()
-                    if c and GK.SetAdvConfig then GK.SetAdvConfig(not c.enabled, c.text) end
+                    if c and GK.SetAdvEnabled then GK.SetAdvEnabled(not c.enabled) end   -- lokalne, nie rozsylane
                 end })
             table.insert(menu, #menu, { text = "Set advert text...", notCheckable = true,
                 func = function() StaticPopup_Show("GIGAKLOCE_ADVTEXT") end })

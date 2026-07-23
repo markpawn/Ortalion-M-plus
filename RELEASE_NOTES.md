@@ -4,21 +4,18 @@
   GitHub doklei pod spodem auto-liste commitow (generate_release_notes).
 -->
 
-# 🛡️ Ortalion M+ — `v4.7`
+# 🛡️ Ortalion M+ — `v4.8`
 
 Addon do organizacji **Mythic+** (WoW 7.3.5, Tauri). Pełna instrukcja: **[README](README.md)**.
 
-## ✨ v4.7 — wyniki M+ (DPS/HPS) + chat emotki
-**Wyniki M+** (integracja z **Details! / Skada / Recount**):
-- **Sugestie Kloc/Chad po dungu** — po ukończeniu M+ popup: **top DPS → Chad** (>110% drugiego), **ostatni DPS → Kloc** (gdy nad nim ≥2×). Tylko DPS-i; pomija osoby z addonem, Ciebie i już dodanych. `/kloce dps`, podgląd `/kloce dps now`.
-- **Statystyki M+ per gracz** — best klucz dla każdego z 14 podziemi + ostatni przebieg z **% obrażeń**. W **Active** tag `H:+N` i okno **„M+ stats"**.
-- **Historia runów** `/kloce runs` — 10 ostatnich przebiegów per podziemie z całą piątką (DPS+HPS). Lokalne.
-
-**Chat emotki**:
-- Wpisz `#nazwa` (np. `#ronaldo`) → u każdego z addonem token → animowany gif nad czatem (hover/klik = replay). Podpowiedzi `#` w edytce (Tab/klik). Auto-pipeline `tools/gif2blp` (gif → BLP + manifest).
+## ✨ v4.8 — statyczne obrazki na czacie + drobiazgi
+- **Obrazki `#nazwa`** — obok animowanych gifów doszły **statyczne obrazki wpisywane wprost w linijkę czatu** (inline). Wpisujesz np. `#uwolnic-barabasza` → u każdego z addonem token zamienia się w obrazek. Nadawca **nie musi mieć addona**. Gify dalej wyświetlają się animowane **nad** czatem, obrazki — **w** czacie.
+- Obrazki są w podpowiedziach `#` w edytce (z miniaturką) i w `/kloce emote <nazwa>`.
+- Nowe obrazki: wrzuć gotowy `.blp` do `assets/images/`, a `tools/gif2blp` sam zaktualizuje manifest (skan nagłówków BLP).
+- **Guild advert — „Enabled" jest teraz lokalny**: włączenie/wyłączenie ogłoszenia dotyczy tylko Ciebie (treść nadal synchronizuje się „ostatnia zmiana wygrywa").
 
 ## 🧬 `DATA_VERSION = 4` (bez zmian)
-Nowe rzeczy (statystyki M+ event `D`, emotki) są **dodatkowe** — v4.x wzajemnie zgodne. Zalecany wspólny `/reload`. Dla DPS/HPS potrzebny damage meter.
+Obrazki czatu to render lokalny — nic nowego w synchronizacji. v4.x nadal wzajemnie zgodne. Zalecany wspólny `/reload`.
 
 ## 📥 Instalacja
 Rozpakuj `GigaKloce.zip` do `Interface/AddOns` (w środku folder `GigaKloce`) i **przeloguj się**.

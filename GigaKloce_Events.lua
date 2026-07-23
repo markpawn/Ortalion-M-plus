@@ -200,12 +200,14 @@ SlashCmdList["KLOCE"] = function(msg)
     elseif cmd == "runs" then
         if ShowRunsWindow then ShowRunsWindow() else log("Run history UI unavailable.") end
 
-    elseif cmd == "emote" then         -- lokalny podglad: wrzuc klikalna miniaturke emotki do czatu
+    elseif cmd == "emote" then         -- lokalny podglad: wrzuc emotke/obrazek do czatu
         local name = (rest ~= "" and rest) or "ronaldo"
         if GK.EMOTES and GK.EMOTES[name] and GK.EmoteChatLink then
             DEFAULT_CHAT_FRAME:AddMessage(GK.EmoteChatLink(name))
+        elseif GK.IMAGES and GK.IMAGES[name] and GK.ImageChatLink then
+            DEFAULT_CHAT_FRAME:AddMessage(GK.ImageChatLink(name))
         else
-            log("Unknown emote: " .. tostring(name))
+            log("Unknown emote/image: " .. tostring(name))
         end
 
     else
@@ -601,6 +603,8 @@ end
 -- ============================
 -- GK.EMOTES ladowane z GigaKloce_Emotes.lua (auto-generowane). Tu tylko fallback.
 GK.EMOTES = GK.EMOTES or {}
+-- GK.IMAGES ladowane z GigaKloce_Images.lua (auto-generowane). Statyczne obrazki -> INLINE w czacie.
+GK.IMAGES = GK.IMAGES or {}
 
 local EMOTE_SIZE  = 220   -- rozmiar ramki na ekranie (px)
 local EMOTE_LOOPS = 2     -- ile petli, potem chowa sie sama
@@ -609,6 +613,23 @@ local shownEmote          -- aktualnie grajaca ramka (tylko jedna naraz)
 
 local function emotePath(name, i)
     return "Interface\\AddOns\\GigaKloce\\assets\\gifs\\" .. name .. "\\" .. name .. "_" .. string.format("%02d", i)
+end
+
+-- ---- Statyczne obrazki (#nazwa -> obrazek WPISANY W LINIJKE czatu) ----
+local IMG_MAX = 128   -- najdluzszy bok obrazka inline (px)
+local function imagePath(name)
+    return "Interface\\AddOns\\GigaKloce\\assets\\images\\" .. name
+end
+-- Inline: |Tpath:H:W|t (proporcje z manifestu). Bez hyperlinku => brak ryzyka "Unknown link type".
+function GK.ImageChatLink(name)
+    local d = GK.IMAGES[name]
+    if not d then return "#" .. name end
+    local w, h = d.w or 256, d.h or 256
+    local m = math.max(w, h, 1)
+    local scale = (m > IMG_MAX) and (IMG_MAX / m) or 1
+    local H = math.max(1, math.floor(h * scale + 0.5))
+    local W = math.max(1, math.floor(w * scale + 0.5))
+    return "|T" .. imagePath(name) .. ":" .. H .. ":" .. W .. "|t"
 end
 
 -- Buduj RAZ i pre-laduj wszystkie klatki jako nakladajace sie tekstury (alfa, nie Show/Hide) => brak flickera.
@@ -696,16 +717,17 @@ end
 -- Filtr: zamien kazdy znany #token na miniaturke; auto-odpal (ostatni z wiadomosci).
 local function emoteChatFilter(self, event, msg, ...)
     if not msg or not msg:find("#[%w_%-]") then return false end
-    local played
+    local played, changed
     local newMsg = msg:gsub("#([%w_%-]+)", function(tok)
-        if GK.EMOTES[tok] then played = tok; return GK.EmoteChatLink(tok) end
+        if GK.EMOTES[tok] then played = tok; changed = true; return GK.EmoteChatLink(tok) end   -- gif: miniaturka + gra NAD czatem
+        if GK.IMAGES[tok] then changed = true; return GK.ImageChatLink(tok) end                 -- obrazek: INLINE w linijce
         return "#" .. tok
     end)
     if played then
         local nm = played
         C_Timer.After(0, function() startEmote(nm) end)
-        return false, newMsg, ...
     end
+    if changed then return false, newMsg, ... end
     return false
 end
 do
@@ -770,11 +792,16 @@ do
         if not s then hideSug(); return end
         local pl = partial:lower()
         wipe(sug.matches)
-        for name in pairs(GK.EMOTES or {}) do
+        local seen = {}
+        local function consider(name)
+            if seen[name] then return end
             if pl == "" or name:lower():find(pl, 1, true) then   -- CONTAINS (gdziekolwiek), nie tylko prefix
+                seen[name] = true
                 sug.matches[#sug.matches + 1] = name
             end
         end
+        for name in pairs(GK.EMOTES or {}) do consider(name) end
+        for name in pairs(GK.IMAGES or {}) do consider(name) end
         table.sort(sug.matches, function(a, b)
             if pl ~= "" then   -- trafienia od poczatku (prefix) na gore, reszta alfabetycznie
                 local pa, pb = (a:lower():find(pl, 1, true) == 1), (b:lower():find(pl, 1, true) == 1)
@@ -788,7 +815,8 @@ do
             local name = sug.matches[i]
             if i <= n and name then
                 b.name = name
-                b.text:SetText("|T" .. emotePath(name, 0) .. ":18:18|t " .. name)
+                local thumb = GK.EMOTES[name] and emotePath(name, 0) or imagePath(name)
+                b.text:SetText("|T" .. thumb .. ":18:18|t " .. name)
                 b:Show()
             else
                 b.name = nil; b:Hide()

@@ -102,6 +102,62 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         results.len(),
         manifest.display()
     );
+
+    // statyczne obrazki: skan assets/images/*.blp -> GigaKloce_Images.lua (nazwa + wymiary z naglowka BLP)
+    write_images_manifest(&base)?;
+
+    Ok(())
+}
+
+// Czyta szerokosc/wysokosc z naglowka BLP2 (magic "BLP2", width @12, height @16, LE u32).
+fn blp_dims(path: &Path) -> Option<(u32, u32)> {
+    let d = fs::read(path).ok()?;
+    if d.len() < 20 || &d[0..4] != b"BLP2" {
+        return None;
+    }
+    let w = u32::from_le_bytes([d[12], d[13], d[14], d[15]]);
+    let h = u32::from_le_bytes([d[16], d[17], d[18], d[19]]);
+    Some((w, h))
+}
+
+// Statyczne obrazki inline w czacie. Wrzuc gotowy .blp do assets/images/<nazwa>.blp,
+// odpal narzedzie -> manifest GK.IMAGES aktualizuje sie sam.
+fn write_images_manifest(base: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let images_dir = base.join("assets").join("images");
+    let manifest = base.join("GigaKloce_Images.lua");
+    let mut imgs: Vec<(String, u32, u32)> = Vec::new();
+    if images_dir.is_dir() {
+        let mut blps: Vec<PathBuf> = fs::read_dir(&images_dir)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("blp")).unwrap_or(false))
+            .collect();
+        blps.sort();
+        for p in &blps {
+            let stem = p.file_stem().and_then(|s| s.to_str()).ok_or("bad image filename")?;
+            let name = stem.to_lowercase();
+            if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                return Err(format!("invalid image name '{name}' (from {}); use only a-z 0-9 _ -", p.display()).into());
+            }
+            let (w, h) = blp_dims(p).ok_or_else(|| format!("{}: not a BLP2 file", p.display()))?;
+            imgs.push((name, w, h));
+        }
+    }
+    imgs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut s = String::new();
+    s.push_str("local _, GK = ...\r\n");
+    s.push_str("-- ============================\r\n");
+    s.push_str("-- AUTO-GENEROWANE przez tools/gif2blp (skan assets/images/*.blp). NIE EDYTUJ RECZNIE.\r\n");
+    s.push_str("-- Statyczne obrazki: token #nazwa -> obrazek WPISANY W LINIJKE czatu (inline).\r\n");
+    s.push_str("-- w/h = wymiary pliku BLP (do zachowania proporcji przy skalowaniu inline).\r\n");
+    s.push_str("-- ============================\r\n");
+    s.push_str("GK.IMAGES = {\r\n");
+    for (name, w, h) in &imgs {
+        s.push_str(&format!("    [\"{name}\"] = {{ w = {w}, h = {h} }},\r\n"));
+    }
+    s.push_str("}\r\n");
+    fs::write(&manifest, s)?;
+    println!("wrote {} image(s) -> {}", imgs.len(), manifest.display());
     Ok(())
 }
 

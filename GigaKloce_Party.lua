@@ -226,27 +226,32 @@ function GK.NoteAdvDone() advLastDoneAt = GetTime() end
 -- manual immediate broadcast (e.g. from the "Broadcast now" menu)
 function GK.AdvBroadcastNow() doAdvBroadcast(true) end
 
--- Set config locally, broadcast over GUILD (LWW), start/stop ticker (when permitted).
-function GK.SetAdvConfig(enabled, text)
+-- Wlacznik jest LOKALNY (kazdy admin decyduje u siebie; nie rozsylany).
+function GK.SetAdvEnabled(enabled)
     local c = advConfig()
     c.enabled = enabled and true or false
+    if c.enabled and GK.AmIAdmin and GK.AmIAdmin() then GK.StartAdvTicker() else GK.StopAdvTicker() end
+end
+
+-- Ustaw+rozglos TEKST (wspolny, LWW po GUILD). Wlacznik zostaje lokalny.
+function GK.SetAdvConfig(enabled, text)
+    local c = advConfig()
     if text ~= nil then c.text = tostring(text) end
     c.t = (GK.now and GK.now()) or 0
     if GK.Send then
+        -- enabledBit wysylany tylko informacyjnie; odbiorcy go IGNORUJA (wlacznik lokalny)
         GK.Send(GK.MSG_ADVCFG .. c.t .. ADV_SEP .. (c.enabled and "1" or "0") .. ADV_SEP .. (c.text or ""), "GUILD")
     end
     if c.enabled and GK.AmIAdmin and GK.AmIAdmin() then GK.StartAdvTicker() else GK.StopAdvTicker() end
 end
 
--- Receive config from another permitted user (LWW by t). Updates local state and ticker.
+-- Odbior configu (LWW po t): aktualizuje TYLKO wspolny tekst. Wlacznik/ticker sa LOKALNE — nie ruszamy.
 function GK.ReceiveAdvConfig(t, enBit, text)
     t = tonumber(t) or 0
     local c = advConfig()
     if t <= (c.t or 0) then return end   -- older/equal -> ignore
     c.t = t
-    c.enabled = (enBit == "1")
     c.text = text or ""
-    if c.enabled and GK.AmIAdmin and GK.AmIAdmin() then GK.StartAdvTicker() else GK.StopAdvTicker() end
 end
 
 -- Strefa + typ instancji gracza po nicku (siebie czytamy na zywo; innych z presence). zone, itype (lub nil).
