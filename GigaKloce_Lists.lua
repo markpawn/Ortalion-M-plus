@@ -96,6 +96,55 @@ local function BroadcastRemove(key, t, channel, target)
     GK.Send(MSG_KREM .. key .. KLOCE_SEP .. (t or GK.now()), channel, target)
 end
 
+-- ===== Digest listy (anti-entropy): maly hash stanu do wykrycia "czy jestem w sync" =====
+-- Hash liczony po KANONICZNEJ (posortowanej) serializacji ZYWYCH wpisow + w formie "na drucie"
+-- (notatka przycieta jak przy wysylce), zeby nadawca i odbiorca liczyli identycznie. Nagrobki
+-- POMIJAMY (przycinanie >60 dni jest lokalne -> rozjezdzalby sie bez powodu; usuniecia i tak
+-- widac po roznicy zywych wpisow). Memo ~2 s: przy zalewie porownan nie liczymy w kolko.
+local function hashStr(s)
+    local h = 5381
+    for i = 1, #s do h = (h * 33 + s:byte(i)) % 2147483648 end   -- h<2^31 -> h*33<2^53, bez utraty precyzji
+    return h
+end
+local function kloceParts()
+    local parts, ks = {}, {}
+    for _, v in ipairs(gigakloce) do ks[#ks + 1] = v end
+    table.sort(ks, function(a, b) return normalizeName(a) < normalizeName(b) end)
+    for _, v in ipairs(ks) do
+        local info = gigakloceInfo[normalizeName(v)] or {}
+        parts[#parts + 1] = "K|" .. normalizeName(v) .. "|" .. (info.tag or DEFAULT_TAG)
+            .. "|" .. san(info.note):sub(1, 70) .. "|" .. (info.t or 0)
+    end
+    return parts
+end
+local digFull, digKloce, digTime = nil, nil, -100
+local function recompute()
+    local parts = kloceParts()
+    digKloce = hashStr(table.concat(parts, "\n"))
+    -- do pelnego digesta dokladamy chady + blokowane gildie
+    local cs = {}
+    for _, v in ipairs(gigachad) do cs[#cs + 1] = v end
+    table.sort(cs, function(a, b) return normalizeName(a) < normalizeName(b) end)
+    for _, v in ipairs(cs) do
+        local info = gigakloceInfo[normalizeName(v)] or {}
+        parts[#parts + 1] = "C|" .. normalizeName(v) .. "|" .. san(info.note):sub(1, 70) .. "|" .. (info.t or 0)
+    end
+    local guilds = (GK.GetBlockedGuilds and GK.GetBlockedGuilds()) or {}
+    local gg = {}
+    for _, g in ipairs(guilds) do gg[#gg + 1] = string.lower(g) end
+    table.sort(gg)
+    for _, lg in ipairs(gg) do
+        parts[#parts + 1] = "G|" .. lg .. "|" .. ((GigaKloceDB.guildTs and GigaKloceDB.guildTs[lg]) or 0)
+    end
+    digFull = hashStr(table.concat(parts, "\n"))
+end
+local function ensureDigest()
+    local now = (GetTime and GetTime()) or 0
+    if not digFull or (now - digTime) >= 2 then recompute(); digTime = now end
+end
+function GK.ListDigest()  ensureDigest(); return digFull end     -- kloce+chad+gildie
+function GK.KloceDigest() ensureDigest(); return digKloce end    -- same kloce (do mostu)
+
 -- Generyczne prymitywy listy (bez broadcastu/nagrobka).
 local function AddToList(tab, name, silent, label, isKloce, by)
     if not isClean(name) then return false end   -- nie zapisuj rozjechanego ladunku jako nicku
@@ -166,7 +215,8 @@ local function AddKloce(name, silent, by)
     if moved and not silent then log(displayName(canonicalDisplay(name)) .. " moved from Chads to Kloce.") end
     if not silent then
         if info then info.t = GK.now() end
-        BroadcastKloceDetails(name)
+        BroadcastKloceDetails(name)             -- GUILD
+        if GK.BridgeKloceAdd then GK.BridgeKloceAdd(name) end   -- most: whisper do innych gildii
     end
     return ok
 end
@@ -325,6 +375,97 @@ end
 -- Przejdz po wszystkich detalach i napraw uszkodzone wpisy.
 local function SanitizeInfo()
     for _, info in pairs(gigakloceInfo) do recoverInfo(info) end
+end
+
+-- ============================
+-- MOST cross-guild KLOCE (WHISPER): zaufany admin (super-admin) wymienia kloce z osoba z INNEJ gildii.
+-- Przez most ida TYLKO kloce (dodania/aktualizacje = MSG_KADD). Chady, blokowane gildie, presence oraz
+-- USUNIECIA nie ida mostem (usuniecie jest list-agnostyczne -> moglo by skasowac chada u odbiorcy).
+-- Odbiorca whispera (moze byc zwyklym userem) re-broadcastuje kloc do SWOJEJ gildii (dokladnie jeden hop).
+-- ============================
+local function amTrusted()   -- czy JA jestem zaufany (super-admin) — tylko wtedy most cokolwiek wysyla
+    return (GK.IsSuperAdmin and GK.IsSuperAdmin(GetUnitFullName("player"))) == true
+end
+local function bridgeTargets()
+    local out = {}
+    for _, disp in pairs(GigaKloceDB.bridges or {}) do if disp and disp ~= "" then out[#out + 1] = disp end end
+    return out
+end
+-- czy nadawca jest zaufany, by wpuscic jego whisper-kloc do MOJEJ gildii (relay): super-admin ALBO moj most
+local function bridgeTrusted(sender)
+    if GK.IsSuperAdmin and GK.IsSuperAdmin(sender) then return true end
+    return (GigaKloceDB.bridges and GigaKloceDB.bridges[normalizeName(sender)] ~= nil) or false
+end
+function GK.IsBridge(name) return (GigaKloceDB.bridges and GigaKloceDB.bridges[normalizeName(name)] ~= nil) or false end
+
+-- wyslij CALA moja liste kloce (same dodania, bez nagrobkow) whisperem do celu
+local function sendKloceListTo(target)
+    if not target or target == "" then return end
+    for _, v in ipairs(gigakloce) do if v ~= "" then BroadcastKloceDetails(v, "WHISPER", target) end end
+end
+GK.SendKloceListTo = sendKloceListTo
+
+-- pojedynczy kloc -> do wszystkich mostow (whisper). Tylko gdy JA jestem zaufany.
+function GK.BridgeKloceAdd(name)
+    if not amTrusted() then return end
+    for _, t in ipairs(bridgeTargets()) do BroadcastKloceDetails(name, "WHISPER", t) end
+end
+
+-- KRQ? od zaufanego (super-admin ALBO moj most) -> odeslij mu moje kloce whisperem
+function GK.OnKloceRequest(sender)
+    if not bridgeTrusted(sender) then return end
+    sendKloceListTo(canonicalDisplay(sender))
+end
+
+-- KDG:<hash> od zaufanego -> pelna wymiana kloce TYLKO gdy hash rozny (anti-entropy na moscie)
+function GK.OnBridgeDigest(sender, dig)
+    if not bridgeTrusted(sender) then return end
+    if tostring((GK.KloceDigest and GK.KloceDigest()) or 0) == tostring(dig) then return end   -- zgodne -> nic
+    local disp = canonicalDisplay(sender)
+    sendKloceListTo(disp)                    -- daj mu moje kloce
+    GK.Send(GK.MSG_KREQ, "WHISPER", disp)    -- i popros o jego
+end
+
+-- relay: whisper-kloc od zaufanego -> wrzuc do MOJEJ gildii (jeden hop; odbiorcy GUILD juz nie forwarduja)
+function GK.RelayBridgeKloce(sender, name)
+    if not bridgeTrusted(sender) then return end
+    BroadcastKloceDetails(name)   -- GUILD
+end
+
+-- login/refresh: wyslij do mostow tylko HASH kloce; pelna wymiana rusza dopiero na mismatch (OnBridgeDigest)
+function GK.PushKloceToBridges()
+    if not amTrusted() then return end
+    local dig = tostring((GK.KloceDigest and GK.KloceDigest()) or 0)
+    for _, t in ipairs(bridgeTargets()) do
+        GK.Send(GK.MSG_KDG .. dig, "WHISPER", t)
+    end
+end
+
+-- zarzadzanie mostami (funkcje sensowne tylko dla super-admina; UI i tak ukryte dla reszty)
+function GK.AddBridge(name)
+    if not isClean(name) then return false end
+    local k = normalizeName(name)
+    if k == "" or k == normalizeName(GetUnitFullName("player")) then return false end
+    GigaKloceDB.bridges[k] = canonicalDisplay(name)
+    if amTrusted() then
+        sendKloceListTo(GigaKloceDB.bridges[k])
+        GK.Send(GK.MSG_KREQ, "WHISPER", GigaKloceDB.bridges[k])
+    end
+    return true
+end
+function GK.RemoveBridge(name)
+    local k = normalizeName(name)
+    if GigaKloceDB.bridges[k] then GigaKloceDB.bridges[k] = nil; return true end
+    for kk, disp in pairs(GigaKloceDB.bridges) do
+        if normalizeName(disp) == k then GigaKloceDB.bridges[kk] = nil; return true end
+    end
+    return false
+end
+function GK.GetBridges()
+    local out = {}
+    for _, disp in pairs(GigaKloceDB.bridges or {}) do out[#out + 1] = disp end
+    table.sort(out)
+    return out
 end
 
 -- Stary "Share" = wymus pelny sync (broadcast).

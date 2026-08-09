@@ -46,51 +46,18 @@ function GK.Send(payload, channel, target)
     end
 end
 
--- ===== Kanal czatu (presence + klucze, cross-guild) =====
-function GK.SyncChannelId()
-    local id = GetChannelName(GK.SYNC_CHANNEL)   -- 0 gdy nie jestesmy w kanale
-    if id and id > 0 then return id end
-    return nil
-end
+-- ===== Presence + klucze + party + staty M+ (H/K/P/D) =====
+-- OD v5: NIE ida juz zwyklym czatem na kanale (to wywolywalo serwerowe "nie mozesz pisac"),
+-- tylko po GUILD addon-message (jak listy) — niewidzialne, nie liczone do anty-spamu czatu.
+-- Zasieg = wlasna gildia (wspolna gildia addona). Cross-guild kloce ida osobno przez "most" (WHISPER).
+-- Kanal OrtalionMplusSync jest wygaszony; JoinSyncChannel to no-op (zostawione dla zgodnosci wywolan).
+function GK.JoinSyncChannel() end
+function GK.SyncChannelId() return nil end
 
--- Dolacza do kanalu i (poza debugiem) chowa go z okien czatu.
-function GK.JoinSyncChannel()
-    if GK.SyncChannelId() then return end
-    local pw = (GK.SYNC_CHANNEL_PW ~= "" and GK.SYNC_CHANNEL_PW) or nil
-    if type(JoinChannelByName) == "function" then
-        JoinChannelByName(GK.SYNC_CHANNEL, pw)
-    elseif type(JoinTemporaryChannel) == "function" then
-        JoinTemporaryChannel(GK.SYNC_CHANNEL, pw)
-    else
-        return
-    end
-    C_Timer.After(1.0, function()
-        if GigaKloceDB and GigaKloceDB.debug then return end   -- debug ON = pokazuj ruch
-        if type(ChatFrame_RemoveChannel) == "function" then
-            for i = 1, (NUM_CHAT_WINDOWS or 10) do
-                local cf = _G["ChatFrame" .. i]
-                if cf then pcall(ChatFrame_RemoveChannel, cf, GK.SYNC_CHANNEL) end
-            end
-        end
-    end)
-end
-
--- Throttlowana wysylka ZWYKLYM czatem na kanal (anti-spam Tauri ~1.3s -> dajemy 1.5s).
--- Dotyczy tylko presence+kluczy (niski wolumen). Indeks kanalu rozwiazywany swiezo.
-local chanQ, chanTicker = {}, nil
+-- H/K/P/D wpadaja do wspolnej kolejki addon-message (GK.Send, throttling ~8/s).
 function GK.SendChan(payload)
-    chanQ[#chanQ + 1] = payload
-    if not chanTicker then
-        chanTicker = C_Timer.NewTicker(1.5, function()
-            local m = table.remove(chanQ, 1)
-            if m then
-                local id = GK.SyncChannelId()
-                if id then SendChatMessage(GK.CHAN_PFX .. m, "CHANNEL", nil, id) end
-            elseif chanTicker then
-                chanTicker:Cancel(); chanTicker = nil
-            end
-        end)
-    end
+    if not IsInGuild() then return end   -- bez gildii addon-msg GUILD nigdzie nie leci
+    GK.Send(payload, "GUILD")
 end
 
 local function NormalizeRealm(realm)

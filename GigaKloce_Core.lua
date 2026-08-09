@@ -8,7 +8,10 @@ GK.AddonPrefix = "GIGA_KLOCE"
 -- WAZNE: kazda zmiana formatu wiadomosci albo struktury danych MUSI podbic ten numer.
 -- v3: presence+klucze przez wlasny kanal czatu (cross-guild); listy sync nadal po GUILD; directed WHISPER state transfer.
 -- v4: cross-guild announce relay (WHISPER GAN -> recipient posts to their guild chat).
-GK.DATA_VERSION = 4
+-- v5: presence/klucze/party/staty M+ (H/K/P/D) PRZENIESIONE z kanalu czatu na GUILD addon-message
+--     (kanal wywolywal serwerowe "nie mozesz pisac"). Kanal OrtalionMplusSync wygaszony.
+--     Cross-guild KLOCE przez "most": admin (super-admin) whisperem pull/push -> odbiorca re-broadcast do swojej gildii.
+GK.DATA_VERSION = 5
 -- Prefiksy wiadomosci sync po ADDON (GUILD/WHISPER), separator \031: K=kloce, C=chad; +=add, -=remove.
 GK.MSG_KADD, GK.MSG_KREM = "K+:", "K-:"
 GK.MSG_CADD, GK.MSG_CREM = "C+:", "C-:"
@@ -22,6 +25,8 @@ GK.MSG_MHREQ = "MHR?" -- directed (WHISPER): super-admin requests target's M+ ru
 GK.MSG_MHIST = "MHN"  -- directed (WHISPER) reply, chunked: MHN<seq>/<total>\031<data> (run history)
 GK.MSG_ADVCFG = "ADVC:" -- advert config sync (enabled+text, LWW) over GUILD
 GK.MSG_ADVDONE = "ADVD:" -- advert "broadcast this cycle" (dedup) over GUILD
+GK.MSG_KREQ = "KRQ?"    -- most cross-guild: super-admin prosi o kloce (WHISPER) -> odbiorca odsyla swoje kloce whisperem
+GK.MSG_KDG = "KDG:"     -- most cross-guild: hash kloce (WHISPER) -> pelna wymiana tylko gdy sie rozni (anti-entropy)
 GK.SUPER_ADMINS = { alvcard = true, dajkamienia = true, vilem = true, ryshard = true, soplice = true, nithalak = true, cwelownik = true }   -- privileged identities (name without realm, lowercase)
 
 -- ===== Kanal czatu: presence + klucze (cross-guild). Addon-msg po kanale nie dziala na Tauri,
@@ -100,6 +105,8 @@ function GK.InitSaved()
     GigaKloceDB.blockedGuilds = GigaKloceDB.blockedGuilds or {}
     -- advert: shared config { enabled, text, t } synchronized LWW between permitted users
     GigaKloceDB.guildAdv = GigaKloceDB.guildAdv or { enabled = false, text = "", t = 0 }
+    -- most cross-guild kloce: [normKey] = displayName (osoby z innej gildii, z ktorymi admin wymienia kloce)
+    GigaKloceDB.bridges = GigaKloceDB.bridges or {}
     -- preferowane zrodlo sync (opcjonalne): nick, od ktorego joiner woli ciagnac stan. nil = auto.
     -- GigaKloceDB.syncSource
 

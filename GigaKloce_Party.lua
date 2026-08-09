@@ -6,7 +6,7 @@ local AddonPrefix, addonUsers, userCache, log, displayName, normalizeName, GetUn
     GK.AddonPrefix, GK.addonUsers, GK.userCache, GK.log, GK.displayName, GK.normalizeName, GK.GetUnitFullName
 local MSG_FLAG = GK.MSG_FLAG
 
-local PRESENCE_STALE = 120   -- po tylu s bez "HI" uznajemy gracza za offline/bez addonu
+local PRESENCE_STALE = 180   -- po tylu s bez "H" = offline/bez addonu (3 cykle 60 s luzu na zgubione wiadomosci)
 local PRES_SEP = "\031"      -- separator class/spec w wiadomosci presence
 
 -- Wlasny spec (nazwa, np. "Restoration") albo "".
@@ -96,10 +96,11 @@ function GK.BroadcastPresence()
     local _, ilvl = GetAverageItemLevel()
     ilvl = math.floor((ilvl or 0) + 0.5)
     local note = (cleanChan((GK.MyGuildNote and GK.MyGuildNote()) or "")):sub(1, 60)
+    local dig = (GK.ListDigest and tostring(GK.ListDigest())) or "0"   -- anti-entropy: hash mojej listy
     local s = GK.CHAN_SEP
     GK.SendChan("H" .. s .. (classFile or "") .. s .. cleanChan(myOwnSpec())
         .. s .. adminBit .. s .. blockedBit .. s .. (GK.DATA_VERSION or 0) .. s .. cleanChan(guild)
-        .. s .. zone .. s .. itype .. s .. ilvl .. s .. note)
+        .. s .. zone .. s .. itype .. s .. ilvl .. s .. note .. s .. dig)
 end
 
 -- "P" party/team: composition only (leader first, max 5). Separate event so "H" stays small.
@@ -109,8 +110,8 @@ function GK.BroadcastParty()
     GK.SendChan("P" .. s .. party)
 end
 
--- Wolane z parsera kanalu (Events): pola juz rozbite.
-function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild, zone, itype, ilvl, note)
+-- Wolane z parsera kanalu (Events): pola juz rozbite. dig = hash listy nadawcy (anti-entropy).
+function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild, zone, itype, ilvl, note, dig)
     if class == "" then class = nil end
     if spec == "" then spec = nil end
     local k = normalizeName(sender)
@@ -124,9 +125,95 @@ function GK.ReceivePresence(sender, class, spec, adm, blk, ver, guild, zone, ity
         itype = (itype and itype ~= "" and itype) or nil,
         ilvl = tonumber(ilvl) or nil,
         note = (note and note ~= "" and note) or nil,
+        dig = (dig and dig ~= "" and dig) or nil,   -- hash listy nadawcy (do reconcile)
         party = prev and prev.party or nil,   -- party comes from the "P" event; don't wipe it here
     }
     cacheUser(sender, class, spec)   -- zawsze pisz do trwalego cache (klasa/spec)
+    if GK.EvalSync then GK.EvalSync() end   -- po aktualizacji presence: sprawdz czy trzeba sie zsync'owac
+end
+
+-- ===== Anti-entropy reconcile (wzorzec GRM: jeden "sync leader", reszta z nim) =====
+-- Lider = najmniejszy znorm. nick wsrod ONLINE userow z addonem (w tym ja), nie-blocked. Wszyscy
+-- liczA to samo z GK.addonUsers, wiec zgadzaja sie bez dodatkowego stanu; przenosi sie sam gdy ktos zniknie.
+function GK.SyncLeader()
+    local now = GetTime()
+    local best
+    if not (GK.AmIBlocked and GK.AmIBlocked()) then best = normalizeName(GetUnitFullName("player")) end
+    for k, u in pairs(addonUsers) do
+        if not u.blocked and (now - (u.t or 0)) <= PRESENCE_STALE then
+            if not best or k < best then best = k end
+        end
+    end
+    return best
+end
+function GK.AmLeader()
+    local l = GK.SyncLeader()
+    return l ~= nil and l == normalizeName(GetUnitFullName("player"))
+end
+
+-- Koalescowany pelny broadcast do gildii (lider radiuje uniA). Max raz / 15 s, po 3 s oknie zbierania.
+local lastGuildSync, guildSyncScheduled = -100, false
+function GK.ScheduleGuildSync()
+    if guildSyncScheduled then return end
+    guildSyncScheduled = true
+    C_Timer.After(3, function()
+        guildSyncScheduled = false
+        local now = GetTime()
+        if (now - lastGuildSync) < 15 then return end
+        lastGuildSync = now
+        log("[sync] radiuje pelny stan do gildii (jestem reconcilerem)")
+        if GK.FullBroadcast then GK.FullBroadcast(true) end   -- force -> pelny stan na GUILD
+    end)
+end
+
+-- Reconcile: porownaj MOJ digest z digestem LIDERA. Zgodne -> nic. Rozjazd:
+--  * jestem liderem -> ktos sie rozjezdza, zaplanuj koalescowany guild-full (radiacja do wszystkich);
+--  * nie-lider -> pchnij swoj pelny stan do LIDERA (whisper, cooldown 30 s); lider zradiuje reszcie.
+local lastPushToLeader = -100
+function GK.EvalSync()
+    -- Uwaga: NIE bramkujemy na acceptSync — udostepnianie/radiacja jest OK; samo APPLIKOWANIE
+    -- cudzych zmian i tak jest gated w handlerze MSG_KADD (acceptSync = "nie przyjmuj", nie "nie dawaj").
+    local myDig = GK.ListDigest and tostring(GK.ListDigest())
+    if not myDig then return end
+    local leaderKey = GK.SyncLeader and GK.SyncLeader()
+    if not leaderKey then return end
+    local meKey = normalizeName(GetUnitFullName("player"))
+    local now = GetTime()
+    if leaderKey == meKey then
+        for _, u in pairs(addonUsers) do
+            if u.dig and u.dig ~= myDig and not u.blocked and (now - (u.t or 0)) <= PRESENCE_STALE then
+                GK.ScheduleGuildSync(); return
+            end
+        end
+    else
+        local lu = addonUsers[leaderKey]
+        if lu and lu.dig and lu.dig ~= myDig and (now - lastPushToLeader) >= 30 then
+            lastPushToLeader = now
+            if GK.FullBroadcast and lu.name then
+                log("[sync] rozjazd z liderem " .. lu.name .. " -> pcham swoj stan do niego")
+                GK.FullBroadcast(true, "WHISPER", lu.name)
+            end
+        end
+    end
+end
+
+-- Diagnostyka (do /kloce leader): kto jest liderem + czyje digesty sie zgadzaja.
+function GK.SyncStatus()
+    local myDig = (GK.ListDigest and tostring(GK.ListDigest())) or "?"
+    local leaderKey = GK.SyncLeader and GK.SyncLeader()
+    local meKey = normalizeName(GetUnitFullName("player"))
+    local now = GetTime()
+    local peers = {}
+    for k, u in pairs(addonUsers) do
+        if (now - (u.t or 0)) <= PRESENCE_STALE then
+            peers[#peers + 1] = { name = u.name or k, dig = u.dig, ok = (tostring(u.dig) == myDig) }
+        end
+    end
+    table.sort(peers, function(a, b) return (a.name or "") < (b.name or "") end)
+    local leaderName = leaderKey and ((addonUsers[leaderKey] and addonUsers[leaderKey].name)
+        or (leaderKey == meKey and displayName(GetUnitFullName("player"))) or leaderKey) or "?"
+    return { leader = leaderName, amLeader = (leaderKey ~= nil and leaderKey == meKey),
+        myDig = myDig, peers = peers }
 end
 
 -- "P" event: update only the team composition on the existing presence entry.

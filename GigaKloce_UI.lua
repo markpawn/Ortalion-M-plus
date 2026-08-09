@@ -759,6 +759,15 @@ local function CreateKloceUI()
                 extra[#extra + 1] = { text = "|cffffd200Force their guild-share|r", notCheckable = true,
                     func = function() if GK.Send then GK.Send(GK.MSG_FSHARE, "WHISPER", who) end
                         GK.out("Asked " .. displayName(who) .. " to share.") end }
+                extra[#extra + 1] = { text = "|cffffd200Bridge kloce (cross-guild)|r", isNotRadio = true, keepShownOnClick = false,
+                    checked = function() return GK.IsBridge and GK.IsBridge(who) end,
+                    func = function()
+                        if GK.IsBridge and GK.IsBridge(who) then
+                            if GK.RemoveBridge then GK.RemoveBridge(who); GK.out("Bridge removed: " .. displayName(who) .. ".") end
+                        elseif GK.AddBridge then
+                            GK.AddBridge(who); GK.out("Bridge added: " .. displayName(who) .. " (wymiana kloce cross-guild).")
+                        end
+                    end }
                 extra[#extra + 1] = { text = "|cff00ff96View detailed M+|r", notCheckable = true,
                     func = function() if GK.RequestMHist then GK.RequestMHist(who) end end }
             end
