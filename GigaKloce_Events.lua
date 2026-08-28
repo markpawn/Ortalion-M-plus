@@ -640,14 +640,20 @@ end
 GK.EMOTES = GK.EMOTES or {}
 -- GK.IMAGES ladowane z GigaKloce_Images.lua (auto-generowane). Statyczne obrazki -> INLINE w czacie.
 GK.IMAGES = GK.IMAGES or {}
+-- Emotki UKRYTE z podpowiedzi #: dzialaja po wpisaniu, ale nie pojawiaja sie w liscie autouzupelniania.
+GK.HIDDEN_EMOTES = GK.HIDDEN_EMOTES or { ["psy"] = true }
 
 local EMOTE_SIZE  = 220   -- rozmiar ramki na ekranie (px)
 local EMOTE_LOOPS = 2     -- ile petli, potem chowa sie sama
 local emoteFrames = {}    -- cache zbudowanych ramek [nazwa] = frame (preload klatek)
 local shownEmote          -- aktualnie grajaca ramka (tylko jedna naraz)
+local emoteSound          -- handle dzwieku aktualnej "video" emotki (StopSound przy podmianie)
 
 local function emotePath(name, i)
     return "Interface\\AddOns\\GigaKloce\\assets\\gifs\\" .. name .. "\\" .. name .. "_" .. string.format("%02d", i)
+end
+local function soundPath(name)
+    return "Interface\\AddOns\\GigaKloce\\assets\\sounds\\" .. name .. ".ogg"
 end
 
 -- ---- Statyczne obrazki (#nazwa -> obrazek WPISANY W LINIJKE czatu) ----
@@ -696,16 +702,23 @@ end
 
 local function stopEmote()
     if shownEmote then shownEmote:SetScript("OnUpdate", nil); shownEmote:Hide(); shownEmote = nil end
+    if emoteSound then StopSound(emoteSound); emoteSound = nil end   -- utnij dzwiek przy podmianie/stopie
 end
 
 local function startEmote(name)
     local f = ensureEmote(name)
     if not f then return end
     stopEmote()
+    local def = GK.EMOTES[name] or {}
+    local loopMax = def.sound and 1 or EMOTE_LOOPS   -- "video" (z dzwiekiem): 1 petla (dlugosc klatek ~= audio)
     for i = 0, f.n - 1 do f.tex[i]:SetAlpha(0) end
     f.cur = 0; f.tex[0]:SetAlpha(1)
     local acc, loops, spf = 0, 0, 1 / f.fps
     f:Show(); shownEmote = f
+    if def.sound and PlaySoundFile then
+        local ok, h = PlaySoundFile(soundPath(name), "Master")   -- dzwiek video; StopSound dopiero przy podmianie
+        if ok then emoteSound = h end
+    end
     f:SetScript("OnUpdate", function(self, dt)
         acc = acc + dt
         if acc < spf then return end
@@ -714,10 +727,10 @@ local function startEmote(name)
         self.cur = self.cur + 1
         if self.cur >= self.n then
             self.cur = 0; loops = loops + 1
-            if loops >= EMOTE_LOOPS then
+            if loops >= loopMax then
                 self:SetScript("OnUpdate", nil); self:Hide()
                 if shownEmote == self then shownEmote = nil end
-                return
+                return   -- dzwiek dogrywa sam; utnie go dopiero nastepna emotka (stopEmote)
             end
         end
         self.tex[self.cur]:SetAlpha(1)
@@ -782,7 +795,8 @@ end
 -- Tab albo klik wstawia pelne "#nazwa ". Znika gdy slowo nie zaczyna sie od #.
 -- ============================
 do
-    local SUG_MAX, SUG_H = 6, 20
+    local SUG_MAX, SUG_H, FOOT = 6, 20, 12   -- max widocznych wierszy; FOOT = pasek "x-y / total"
+    local renderRows, scroll                 -- forward: handlery kolka uzywaja ich nizej
     local sug = CreateFrame("Frame", "GigaKloceEmoteSuggest", UIParent)
     sug:SetFrameStrata("TOOLTIP")
     sug:Hide()
@@ -796,6 +810,8 @@ do
     sug.box = nil          -- edytka, ktorej dotyczy
     sug.rows = {}
     sug.matches = {}
+    sug.offset = 0
+    sug.lastPartial = nil
     for i = 1, SUG_MAX do
         local b = CreateFrame("Button", nil, sug)
         b:SetHeight(SUG_H)
@@ -807,10 +823,19 @@ do
         b:SetScript("OnClick", function(self)
             if sug.box and self.name then GK.AcceptEmoteSuggest(sug.box, self.name) end
         end)
+        b:EnableMouseWheel(true)
+        b:SetScript("OnMouseWheel", function(_, d) if scroll then scroll(d) end end)
         sug.rows[i] = b
     end
+    -- pasek "ile widac / ile jest" (tylko gdy wynikow > SUG_MAX)
+    sug.more = sug:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    sug.more:SetPoint("BOTTOM", 0, 4)
+    sug.more:Hide()
+    -- scroll kolkiem nad calym popupem
+    sug:EnableMouseWheel(true)
+    sug:SetScript("OnMouseWheel", function(_, d) if scroll then scroll(d) end end)
 
-    local function hideSug() sug:Hide(); sug.box = nil; wipe(sug.matches) end
+    local function hideSug() sug:Hide(); sug.box = nil; sug.offset = 0; sug.lastPartial = nil; wipe(sug.matches) end
 
     -- slowo zaczynajace sie od # tuz przed kursorem: zwraca (bytePos '#', partial) lub nil
     local function tokenBeforeCursor(box)
@@ -821,15 +846,51 @@ do
         return s, partial
     end
 
+    -- narysuj widoczne okno wynikow wg sug.offset (+ wskaznik "x-y / total")
+    renderRows = function()
+        local total = #sug.matches
+        local maxOff = math.max(0, total - SUG_MAX)
+        if sug.offset > maxOff then sug.offset = maxOff end
+        if sug.offset < 0 then sug.offset = 0 end
+        local n = math.min(total, SUG_MAX)
+        for i, b in ipairs(sug.rows) do
+            local name = sug.matches[sug.offset + i]
+            if i <= n and name then
+                b.name = name
+                local thumb = GK.EMOTES[name] and emotePath(name, 0) or imagePath(name)
+                b.text:SetText("|T" .. thumb .. ":18:18|t " .. name)
+                b:Show()
+            else
+                b.name = nil; b:Hide()
+            end
+        end
+        local footer = (total > SUG_MAX) and FOOT or 0
+        if footer > 0 then
+            sug.more:SetText((sug.offset + 1) .. "-" .. (sug.offset + n) .. " / " .. total)
+            sug.more:Show()
+        else
+            sug.more:Hide()
+        end
+        sug:SetHeight(8 + n * SUG_H + footer)
+        sug:SetWidth(180)
+    end
+    scroll = function(delta)
+        if not sug:IsShown() then return end
+        sug.offset = sug.offset - (delta or 0)   -- kolko w gore (delta>0) -> wczesniejsze pozycje
+        renderRows()
+    end
+
     local function updateSug(box)
         if not box:HasFocus() then hideSug(); return end
         local s, partial = tokenBeforeCursor(box)
         if not s then hideSug(); return end
         local pl = partial:lower()
+        if pl ~= sug.lastPartial then sug.offset = 0; sug.lastPartial = pl end   -- nowe zapytanie -> od gory
         wipe(sug.matches)
         local seen = {}
         local function consider(name)
             if seen[name] then return end
+            if GK.HIDDEN_EMOTES and GK.HIDDEN_EMOTES[name] then return end   -- ukryte: nie podpowiadaj (dzialaja po wpisaniu)
             if pl == "" or name:lower():find(pl, 1, true) then   -- CONTAINS (gdziekolwiek), nie tylko prefix
                 seen[name] = true
                 sug.matches[#sug.matches + 1] = name
@@ -844,21 +905,8 @@ do
             end
             return a < b
         end)
-        local n = math.min(#sug.matches, SUG_MAX)
-        if n == 0 then hideSug(); return end
-        for i, b in ipairs(sug.rows) do
-            local name = sug.matches[i]
-            if i <= n and name then
-                b.name = name
-                local thumb = GK.EMOTES[name] and emotePath(name, 0) or imagePath(name)
-                b.text:SetText("|T" .. thumb .. ":18:18|t " .. name)
-                b:Show()
-            else
-                b.name = nil; b:Hide()
-            end
-        end
-        sug:SetHeight(8 + n * SUG_H)
-        sug:SetWidth(160)
+        if #sug.matches == 0 then hideSug(); return end
+        renderRows()
         sug:ClearAllPoints()
         sug:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 0, 4)
         sug.box = box

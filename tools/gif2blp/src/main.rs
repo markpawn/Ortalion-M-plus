@@ -32,30 +32,36 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
     let raw_dir = base.join("assets").join("raw_gifs");
+    let video_dir = base.join("assets").join("raw_video");   // wideo z dzwiekiem -> "video" emotki (klatki + audio)
     let gifs_dir = base.join("assets").join("gifs");
+    let sounds_dir = base.join("assets").join("sounds");
     let manifest = base.join("GigaKloce_Emotes.lua");
 
-    if !raw_dir.is_dir() {
-        return Err(format!("raw_gifs folder not found: {}", raw_dir.display()).into());
+    if !raw_dir.is_dir() && !video_dir.is_dir() {
+        return Err(format!("brak folderow zrodel: {} ani {}", raw_dir.display(), video_dir.display()).into());
     }
 
-    // collect *.gif + wideo (mp4/mov/webm/mkv/avi/m4v -> przez ffmpeg)
+    // collect *.gif + wideo (mp4/mov/webm/mkv/avi/m4v -> przez ffmpeg); z raw_gifs ORAZ raw_video
     fn is_video(ext: &str) -> bool {
         matches!(ext.to_ascii_lowercase().as_str(), "mp4" | "mov" | "webm" | "mkv" | "avi" | "m4v")
     }
-    let mut srcs: Vec<PathBuf> = fs::read_dir(&raw_dir)?
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("gif") || is_video(x)).unwrap_or(false)
-        })
-        .collect();
+    let mut srcs: Vec<PathBuf> = Vec::new();
+    for dir in [&raw_dir, &video_dir] {
+        if !dir.is_dir() { continue; }
+        for e in fs::read_dir(dir)? {
+            let p = e?.path();
+            let ok = p.extension().and_then(|x| x.to_str())
+                .map(|x| x.eq_ignore_ascii_case("gif") || is_video(x)).unwrap_or(false);
+            if ok { srcs.push(p); }
+        }
+    }
     srcs.sort();
     if srcs.is_empty() {
-        return Err(format!("no .gif / video files in {}", raw_dir.display()).into());
+        return Err(format!("brak plikow .gif / wideo w {} ani {}", raw_dir.display(), video_dir.display()).into());
     }
 
-    println!("converting {} source(s) from {}:", srcs.len(), raw_dir.display());
-    let mut results: Vec<(String, usize, i64)> = Vec::new();
+    println!("converting {} source(s):", srcs.len());
+    let mut results: Vec<(String, usize, i64, bool)> = Vec::new();
     for src in &srcs {
         let stem = src
             .file_stem()
@@ -71,13 +77,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         let out = gifs_dir.join(&name);
         let ext = src.extension().and_then(|x| x.to_str()).unwrap_or("");
-        let (frames, fps) = if is_video(ext) {
-            process_video(&name, src, &out)?
+        let (frames, fps, sound) = if is_video(ext) {
+            let (fr, fp) = process_video(&name, src, &out)?;
+            let snd = extract_audio(&name, src, &sounds_dir);   // wideo -> sprobuj wyciagnac audio do .ogg (video emotka)
+            (fr, fp, snd)
         } else {
-            process_gif(&name, src, &out)?
+            let (fr, fp) = process_gif(&name, src, &out)?;
+            (fr, fp, false)
         };
-        println!("  {name:<16} {frames:>3} frames  ~{fps} fps");
-        results.push((name, frames, fps));
+        println!("  {name:<16} {frames:>3} frames  ~{fps} fps{}", if sound { "  +audio" } else { "" });
+        results.push((name, frames, fps, sound));
     }
 
     // overwrite the manifest (sorted, stable)
@@ -85,14 +94,20 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut s = String::new();
     s.push_str("local _, GK = ...\r\n");
     s.push_str("-- ============================\r\n");
-    s.push_str("-- AUTO-GENEROWANE przez tools/gif2blp (z assets/raw_gifs/*.gif). NIE EDYTUJ RECZNIE.\r\n");
-    s.push_str("-- Caly plik jest nadpisywany przy kazdej konwersji.\r\n");
+    s.push_str("-- AUTO-GENEROWANE przez tools/gif2blp (z assets/raw_gifs/* i assets/raw_video/*). NIE EDYTUJ RECZNIE.\r\n");
+    s.push_str("-- Caly plik jest nadpisywany przy kazdej konwersji. sound=true => video (klatki + assets/sounds/<name>.ogg).\r\n");
     s.push_str("-- ============================\r\n");
     s.push_str("GK.EMOTES = {\r\n");
-    for (name, frames, fps) in &results {
-        s.push_str(&format!(
-            "    [\"{name}\"] = {{ frames = {frames}, fps = {fps} }},\r\n"
-        ));
+    for (name, frames, fps, sound) in &results {
+        if *sound {
+            s.push_str(&format!(
+                "    [\"{name}\"] = {{ frames = {frames}, fps = {fps}, sound = true }},\r\n"
+            ));
+        } else {
+            s.push_str(&format!(
+                "    [\"{name}\"] = {{ frames = {frames}, fps = {fps} }},\r\n"
+            ));
+        }
     }
     s.push_str("}\r\n");
     fs::write(&manifest, s)?;
@@ -233,6 +248,29 @@ fn ffmpeg_bin() -> PathBuf {
         return cwd;
     }
     PathBuf::from("ffmpeg") // ostatecznie z PATH
+}
+
+// Wyciaga sciezke audio z wideo do assets/sounds/<name>.ogg (libvorbis). Zwraca true gdy sie udalo
+// (czyli wideo mialo audio -> "video" emotka). Bez audio: ffmpeg zwraca blad, kasujemy pusty plik -> false.
+fn extract_audio(name: &str, src: &Path, sounds_dir: &Path) -> bool {
+    if fs::create_dir_all(sounds_dir).is_err() {
+        return false;
+    }
+    let out = sounds_dir.join(format!("{}.ogg", name));
+    let _ = fs::remove_file(&out);
+    let ff = ffmpeg_bin();
+    let status = std::process::Command::new(&ff)
+        .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
+        .arg(src)
+        .args(["-vn", "-c:a", "libvorbis", "-q:a", "3"])
+        .arg(&out)
+        .status();
+    let ok = matches!(status, Ok(s) if s.success())
+        && fs::metadata(&out).map(|m| m.len() > 0).unwrap_or(false);
+    if !ok {
+        let _ = fs::remove_file(&out);
+    }
+    ok
 }
 
 // Wideo (mp4/...): ffmpeg rozbija na klatki @12 fps, 256x256, potem encode do BLP.

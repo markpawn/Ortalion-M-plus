@@ -21,6 +21,7 @@ GK.EMOTES = {
     ["najman"] = { frames = 76, fps = 10 },
     ["poe"] = { frames = 59, fps = 15 },
     ["polska-gurom"] = { frames = 28, fps = 25 },
+    ["psy"] = { frames = 110, fps = 12, sound = true },
     ["ronaldo"] = { frames = 25, fps = 9 },
     ["smart"] = { frames = 27, fps = 15 },
     ["sus"] = { frames = 22, fps = 20 },
