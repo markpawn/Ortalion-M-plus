@@ -2,7 +2,7 @@
 ## Title: GigaKloce
 ## Notes: Lomqe bandit
 ## Author: Alvcard
-## Version: 5.1
+## Version: 5.2
 ## SavedVariables: GigaKloceDB
 
 GigaKloce_Core.lua

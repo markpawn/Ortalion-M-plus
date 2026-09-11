@@ -19,6 +19,19 @@ use wow_blp::encode::save_blp;
 
 const SIZE: u32 = 256;
 
+// Wpasuj obraz w kwadrat SIZE x SIZE Z ZACHOWANIEM PROPORCJI: skaluj by zmiescic sie w SIZE,
+// reszte zostaw PRZEZROCZYSTA (alpha w DXT5), a tresc zakotwicz na DOLE-SRODKU. Kwadratowe
+// zrodlo wypelnia caly kwadrat (brak paddingu -> wynik identyczny jak wczesniej).
+fn fit_bottom_center(img: image::DynamicImage) -> RgbaImage {
+    let fitted = img.resize(SIZE, SIZE, FilterType::Lanczos3).to_rgba8();
+    let (w, h) = (fitted.width(), fitted.height());
+    let mut canvas = RgbaImage::new(SIZE, SIZE); // przezroczyste tlo (0,0,0,0)
+    let x = (SIZE.saturating_sub(w) / 2) as i64; // wysrodkuj w poziomie
+    let y = SIZE.saturating_sub(h) as i64;       // przyklej do dolu
+    overlay(&mut canvas, &fitted, x, y);
+    canvas
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("gif2blp error: {e}");
@@ -203,8 +216,9 @@ fn process_gif(
 
         overlay(&mut canvas, frame.buffer(), frame.left() as i64, frame.top() as i64);
 
-        let img = image::DynamicImage::ImageRgba8(canvas.clone())
-            .resize_exact(SIZE, SIZE, FilterType::Lanczos3);
+        let img = image::DynamicImage::ImageRgba8(
+            fit_bottom_center(image::DynamicImage::ImageRgba8(canvas.clone())),
+        );
 
         let blp = image_to_blp(
             img,
@@ -289,7 +303,7 @@ fn process_video(
     let status = std::process::Command::new(&ff)
         .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
         .arg(path)
-        .args(["-vf", &format!("fps={VIDEO_FPS},scale=256:256:flags=lanczos")])
+        .args(["-vf", &format!("fps={VIDEO_FPS},scale=256:256:force_original_aspect_ratio=decrease:flags=lanczos")])
         .arg(&pat)
         .status()
         .map_err(|e| format!(
@@ -315,7 +329,7 @@ fn process_video(
     }
 
     for (i, png) in pngs.iter().enumerate() {
-        let img = image::open(png)?.resize_exact(SIZE, SIZE, FilterType::Lanczos3);
+        let img = image::DynamicImage::ImageRgba8(fit_bottom_center(image::open(png)?));
         let blp = image_to_blp(
             img,
             true,

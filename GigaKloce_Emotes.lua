@@ -1,7 +1,7 @@
 local _, GK = ...
 -- ============================
--- AUTO-GENEROWANE przez tools/gif2blp (z assets/raw_gifs/*.gif). NIE EDYTUJ RECZNIE.
--- Caly plik jest nadpisywany przy kazdej konwersji.
+-- AUTO-GENEROWANE przez tools/gif2blp (z assets/raw_gifs/* i assets/raw_video/*). NIE EDYTUJ RECZNIE.
+-- Caly plik jest nadpisywany przy kazdej konwersji. sound=true => video (klatki + assets/sounds/<name>.ogg).
 -- ============================
 GK.EMOTES = {
     ["anyway"] = { frames = 19, fps = 10 },
@@ -11,6 +11,7 @@ GK.EMOTES = {
     ["czarny"] = { frames = 108, fps = 24 },
     ["dog"] = { frames = 97, fps = 12 },
     ["garrosh"] = { frames = 121, fps = 30 },
+    ["halo"] = { frames = 109, fps = 12, sound = true },
     ["idziesz"] = { frames = 75, fps = 10 },
     ["kargull"] = { frames = 137, fps = 20 },
     ["kimochi"] = { frames = 100, fps = 30 },

@@ -641,9 +641,9 @@ GK.EMOTES = GK.EMOTES or {}
 -- GK.IMAGES ladowane z GigaKloce_Images.lua (auto-generowane). Statyczne obrazki -> INLINE w czacie.
 GK.IMAGES = GK.IMAGES or {}
 -- Emotki UKRYTE z podpowiedzi #: dzialaja po wpisaniu, ale nie pojawiaja sie w liscie autouzupelniania.
-GK.HIDDEN_EMOTES = GK.HIDDEN_EMOTES or { ["psy"] = true }
+GK.HIDDEN_EMOTES = GK.HIDDEN_EMOTES or { ["psy"] = true, ["halo"] = true }
 
-local EMOTE_SIZE  = 220   -- rozmiar ramki na ekranie (px)
+local EMOTE_SIZE  = 264   -- rozmiar ramki na ekranie (px); +20% wzgl. 220 (dotyczy gifow i wideo)
 local EMOTE_LOOPS = 2     -- ile petli, potem chowa sie sama
 local emoteFrames = {}    -- cache zbudowanych ramek [nazwa] = frame (preload klatek)
 local shownEmote          -- aktualnie grajaca ramka (tylko jedna naraz)

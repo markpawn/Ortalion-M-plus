@@ -4,15 +4,15 @@
   GitHub doklei pod spodem auto-liste commitow (generate_release_notes).
 -->
 
-# 🛡️ Ortalion M+ — `v5.1`
+# 🛡️ Ortalion M+ — `v5.2`
 
 Addon do organizacji **Mythic+** (WoW 7.3.5, Tauri). Pełna instrukcja: **[README](README.md)**.
 
-## 🔧 v5.1 — bugfixing
+## 🔧 v5.2 — bugfixing
 Drobne poprawki i usprawnienia interfejsu. Bez zmian w synchronizacji.
 
 ## 🧬 `DATA_VERSION = 5` (bez zmian)
-Zgodne z v5.0 — wystarczy `/reload`.
+Zgodne z v5.0 / v5.1 — wystarczy `/reload`.
 
 ## 📥 Instalacja
 Rozpakuj `GigaKloce.zip` do `Interface/AddOns` (w środku folder `GigaKloce`) i **przeloguj się**.
