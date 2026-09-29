@@ -4,17 +4,15 @@
   GitHub doklei pod spodem auto-liste commitow (generate_release_notes).
 -->
 
-# 🛡️ Ortalion M+ — `v5.3`
+# 🛡️ Ortalion M+ — `v5.4`
 
 Addon do organizacji **Mythic+** (WoW 7.3.5, Tauri). Pełna instrukcja: **[README](README.md)**.
 
-## 🎬 v5.3 — dwie nowe emotki wideo
-`#kapie` (121 klatek, 10 s) i `#soplica` (60 klatek, 5 s) — obrazek + dźwięk, grają raz.
-Tak jak `#psy` i `#halo`: działają po wpisaniu, ale nie pokazują się w podpowiedziach `#`.
-Bez zmian w synchronizacji.
+## 🔧 v5.4 — bugfixing
+Drobne poprawki i usprawnienia interfejsu. Bez zmian w synchronizacji.
 
 ## 🧬 `DATA_VERSION = 5` (bez zmian)
-Zgodne z v5.0 / v5.1 / v5.2 — wystarczy `/reload`.
+Zgodne z v5.x — wystarczy `/reload`.
 
 ## 📥 Instalacja
 Rozpakuj `GigaKloce.zip` do `Interface/AddOns` (w środku folder `GigaKloce`) i **przeloguj się**.

@@ -1035,6 +1035,28 @@ local function CreateKloceUI()
     local rightHeader = rightPanel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     rightHeader:SetPoint("TOPLEFT", 10, -8)
 
+    -- pole SEARCH (tylko Kloce/Chady): filtruje liste po nazwie / tagu / notatce
+    local searchBox = CreateFrame("EditBox", nil, leftPanel, "InputBoxTemplate")
+    searchBox:SetSize(150, 20)
+    searchBox:SetPoint("TOPRIGHT", -14, -5)
+    searchBox:SetAutoFocus(false)
+    searchBox:Hide()
+    local searchPH = searchBox:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    searchPH:SetPoint("LEFT", 6, 0)
+    searchPH:SetText("Search…")
+    local function updateSearchPH()
+        searchPH:SetShown(searchBox:GetText() == "" and not searchBox:HasFocus())
+    end
+    searchBox:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
+    searchBox:SetScript("OnTextChanged", function(self)
+        KloceFrame.searchText = (self:GetText() or ""):lower()
+        updateSearchPH()
+        if KloceFrame.RefreshList then KloceFrame.RefreshList() end
+    end)
+    searchBox:SetScript("OnEditFocusGained", updateSearchPH)
+    searchBox:SetScript("OnEditFocusLost", updateSearchPH)
+    KloceFrame.searchBox = searchBox
+
     local function HeaderLine(pnl)
         local ln = pnl:CreateTexture(nil, "ARTWORK")
         ln:SetColorTexture(1, 1, 1, 0.13)
@@ -1330,11 +1352,39 @@ local function CreateKloceUI()
 
         local chadMode = (KloceFrame.mode == "chad")
         local tab = chadMode and gigachad or gigakloce
-        local count = #tab
-        leftEmpty:SetText(chadMode and "No chads saved yet." or "No kloce saved yet.")
-        leftHeader:SetText((chadMode and "Saved Chads " or "Saved Kloce ") .. "|cff888888(" .. count .. ")|r")
+        local total = #tab
+        local q = KloceFrame.searchText
+        if q == "" then q = nil end
+        local filtered = {}
+        for _, entry in ipairs(tab) do
+            if not q then
+                filtered[#filtered + 1] = entry
+            else
+                local info = GetKloceInfo(entry)
+                local hay = displayName(entry):lower()
+                if info then
+                    if info.tag and info.tag ~= "" then hay = hay .. " " .. tostring(info.tag):lower() end
+                    if info.note and info.note ~= "" then hay = hay .. " " .. tostring(info.note):lower() end
+                end
+                if hay:find(q, 1, true) then filtered[#filtered + 1] = entry end
+            end
+        end
+        local count = #filtered
+        if total == 0 then
+            leftEmpty:SetText(chadMode and "No chads saved yet." or "No kloce saved yet.")
+        else
+            leftEmpty:SetText("No matches.")
+        end
         if count == 0 then leftEmpty:Show() else leftEmpty:Hide() end
-        for i, entry in ipairs(tab) do
+        do
+            local hdr = chadMode and "Saved Chads " or "Saved Kloce "
+            if q and count ~= total then
+                leftHeader:SetText(hdr .. "|cff888888(" .. count .. " / " .. total .. ")|r")
+            else
+                leftHeader:SetText(hdr .. "|cff888888(" .. total .. ")|r")
+            end
+        end
+        for i, entry in ipairs(filtered) do
             local row = AcquireRow(contentLeft, KloceFrame.items, i)
             local info = GetKloceInfo(entry)
             local cls = info and info.class
@@ -1503,6 +1553,9 @@ local function CreateKloceUI()
         editBox:SetShown(showInput)
         addBtn:SetShown(showInput)
         tip:SetShown(showInput)
+        -- search: widoczny tylko dla Kloce/Chady; przy kazdej zmianie zakladki czyscimy filtr
+        searchBox:SetText("")
+        searchBox:SetShown(showInput)
         -- toggle Preset widoczny i podswietlony tylko w Active (gdy wlaczony)
         presetToggle:SetShown(activeMode)
         styleTab(presetToggle, activeMode and KloceFrame.presetOpen)
