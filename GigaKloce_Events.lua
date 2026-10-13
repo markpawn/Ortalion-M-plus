@@ -225,9 +225,12 @@ SlashCmdList["KLOCE"] = function(msg)
         local sub = string.lower(rest or "")
         if sub == "now" then
             if GK.MeterEvaluate then GK.MeterEvaluate({ test = true }) end   -- dry-run na biezacych danych metra
+        elseif sub == "kloc" then
+            GigaKloceDB.dpsSuggestKloc = not GigaKloceDB.dpsSuggestKloc
+            log("Suggest Kloc by DPS after M+: " .. onOff(GigaKloceDB.dpsSuggestKloc))
         else
             GigaKloceDB.dpsSuggest = not GigaKloceDB.dpsSuggest
-            log("DPS suggestions after M+: " .. onOff(GigaKloceDB.dpsSuggest))
+            log("Suggest Chad by DPS after M+: " .. onOff(GigaKloceDB.dpsSuggest))
         end
 
     elseif cmd == "runs" then
@@ -310,6 +313,18 @@ f:RegisterEvent("WHO_LIST_UPDATE")
 f:RegisterEvent("CHALLENGE_MODE_START")       -- start M+: snapshot DPS (baseline)
 f:RegisterEvent("CHALLENGE_MODE_COMPLETED")   -- koniec M+: ocena DPS + sugestie chad/kloc
 f:RegisterEvent("PLAYER_ENTERING_WORLD")      -- wejscie do M+ po /reload: doraisny baseline
+f:RegisterEvent("BAG_UPDATE_DELAYED")         -- zmiana w torbach -> wykryj nowy klucz M+ i rozglos od razu
+
+-- auto-broadcast klucza przy zmianie (debounce; keystone to item w torbach)
+local keyCheckPending = false
+local function scheduleKeyCheck(delay)
+    if keyCheckPending then return end
+    keyCheckPending = true
+    C_Timer.After(delay or 1, function()
+        keyCheckPending = false
+        if GK.BroadcastKeyIfChanged then GK.BroadcastKeyIfChanged() end
+    end)
+end
 
 f:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
@@ -358,6 +373,11 @@ f:SetScript("OnEvent", function(self, event, ...)
         if GK.OnChallengeStart then GK.OnChallengeStart() end
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         if GK.OnChallengeComplete then GK.OnChallengeComplete() end
+        -- nowy klucz po dungu pojawia sie w torbach z opoznieniem -> doczytaj i rozglos (idempotentne)
+        C_Timer.After(5, function() if GK.BroadcastKeyIfChanged then GK.BroadcastKeyIfChanged() end end)
+        C_Timer.After(10, function() if GK.BroadcastKeyIfChanged then GK.BroadcastKeyIfChanged() end end)
+    elseif event == "BAG_UPDATE_DELAYED" then
+        scheduleKeyCheck(1)   -- zmiana w torbach -> jesli to nowy keystone, rozglos od razu (dedup w srodku)
     elseif event == "PLAYER_ENTERING_WORLD" then
         if GK.OnEnterWorldMeter then GK.OnEnterWorldMeter() end
     elseif event == "INSPECT_READY" then

@@ -191,7 +191,9 @@ end
 -- ============================
 function GK.MeterEvaluate(opts)
     opts = opts or {}
-    if not opts.test and not (GigaKloceDB and GigaKloceDB.dpsSuggest) then return end
+    local suggestChad = GigaKloceDB and GigaKloceDB.dpsSuggest
+    local suggestKloc = GigaKloceDB and GigaKloceDB.dpsSuggestKloc
+    if not opts.test and not (suggestChad or suggestKloc) then return end
     if not IsInGroup() then
         if opts.test then GK.out("[DPS] Nie jestes w grupie.") end
         return
@@ -222,23 +224,34 @@ function GK.MeterEvaluate(opts)
         return fmt(dmg) .. " dmg"
     end
 
-    -- czy kandydata wolno zaproponowac na dana liste (nie my, nie ma addona, nie jest juz na tej liscie)
+    -- zbior MOJEJ gildii (nie sugerujemy guildmate'ow — ani na chada, ani na kloca)
+    local inMyGuild = {}
+    if IsInGuild() then
+        if type(GuildRoster) == "function" then GuildRoster() end
+        for i = 1, (GetNumGuildMembers() or 0) do
+            local gname = GetGuildRosterInfo(i)
+            if gname then inMyGuild[normalizeName(gname)] = true end
+        end
+    end
+
+    -- czy kandydata wolno zaproponowac na dana liste (nie my, nie ma addona, nie z mojej gildii, nie juz na liscie)
     local function eligible(p, list)
         if p.key == meKey then return false end
         if isAddonUser(p.key) then return false end
+        if inMyGuild[p.key] then return false end            -- gracz z mojej gildii -> nie sugeruj
         if has_value(list, p.name) then return false end
         return true
     end
 
     -- CHAD: top DPS, gdy > 110% drugiego (drugi musi miec realne obrazenia).
     local top, second = ranked[1], ranked[2]
-    if second.dmg > 0 and top.dmg > 1.10 * second.dmg and eligible(top, GK.gigachad) then
+    if (opts.test or suggestChad) and second.dmg > 0 and top.dmg > 1.10 * second.dmg and eligible(top, GK.gigachad) then
         StaticPopup_Show("GIGAKLOCE_DPS_CHAD", displayName(top.name), dpsStr(top.dmg), top.name)
     end
 
-    -- KLOC: ostatni DPS, gdy gracz nad nim zrobil >= 2x tyle (i sam zrobil cokolwiek).
+    -- KLOC: ostatni DPS, gdy gracz nad nim zrobil >= 2x tyle (i sam zrobil cokolwiek). Domyslnie OFF.
     local last, above = ranked[#ranked], ranked[#ranked - 1]
-    if above.dmg > 0 and above.dmg >= 2 * last.dmg and eligible(last, GK.gigakloce) then
+    if (opts.test or suggestKloc) and above.dmg > 0 and above.dmg >= 2 * last.dmg and eligible(last, GK.gigakloce) then
         StaticPopup_Show("GIGAKLOCE_DPS_KLOC", displayName(last.name), dpsStr(last.dmg), last.name)
     end
 end
@@ -256,7 +269,7 @@ end
 function GK.OnChallengeComplete()
     -- maly poslizg, zeby metr domknal ostatni pull przed odczytem
     C_Timer.After(2, function()
-        if GigaKloceDB and GigaKloceDB.dpsSuggest then GK.MeterEvaluate() end
+        if GigaKloceDB and (GigaKloceDB.dpsSuggest or GigaKloceDB.dpsSuggestKloc) then GK.MeterEvaluate() end
         if GK.RecordCompletedRun then GK.RecordCompletedRun() end   -- highest key + % dmg (zawsze)
     end)
 end

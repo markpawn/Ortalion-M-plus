@@ -86,14 +86,28 @@ GK.MyGuildNote = myGuildNote   -- udostepnij (presence wysyla notatke jako atryb
 -- Rozglasza Twoj klucz po KANALE (cicho, cross-guild) i zapisuje lokalnie.
 -- UWAGA: klucz niesie TYLKO dungeon+level. ilvl/notatka/strefa to atrybuty GRACZA -> ida w presence,
 -- dzieki czemu pokazuja sie tez dla osob BEZ klucza.
+local lastKeyStr   -- ostatnio rozgloszone "dungeon|level" (dedup auto-broadcastu po zmianie klucza)
 function GK.BroadcastMyKey()
     local dungeon, level = GK.GetMyKeystone()
-    if not dungeon then return end
+    if not dungeon then lastKeyStr = "none"; return end
     local me = GetUnitFullName("player")
     guildKeys[normalizeName(me)] = { name = displayName(me), dungeon = dungeon, level = level or 0, t = GetTime() }
+    lastKeyStr = tostring(dungeon) .. "|" .. (level or 0)
     local s = GK.CHAN_SEP
     GK.SendChan("K" .. s .. (tostring(dungeon):gsub("[%c~]", " ")) .. s .. (level or 0))
     if KloceFrame and KloceFrame.mode == "active" and KloceFrame.RefreshList then KloceFrame.RefreshList() end
+end
+
+-- Rozglos TYLKO gdy klucz sie zmienil od ostatniego broadcastu (auto po dungu / zmianie w torbach).
+-- Dzieki temu po wyjsciu z M+ nowy klucz leci od razu, bez czekania na 60-sekundowy heartbeat.
+function GK.BroadcastKeyIfChanged()
+    local dungeon, level = GK.GetMyKeystone()
+    local cur = dungeon and (tostring(dungeon) .. "|" .. (level or 0)) or "none"
+    if cur ~= lastKeyStr then
+        GK.BroadcastMyKey()   -- ustawi lastKeyStr (nowy klucz albo "none")
+        return true
+    end
+    return false
 end
 
 -- Odbior klucza z kanalu (pola juz rozbite przez parser w Events).

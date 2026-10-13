@@ -825,6 +825,16 @@ local function CreateKloceUI()
               checked = function() return GigaKloceDB.debug end,
               func = function() GigaKloceDB.debug = not GigaKloceDB.debug
                   GK.out("Debug logging: " .. onOff(GigaKloceDB.debug)) end },
+            { text = "Suggest Chad by DPS (after M+)",
+              isNotRadio = true, keepShownOnClick = true,
+              checked = function() return GigaKloceDB.dpsSuggest end,
+              func = function() GigaKloceDB.dpsSuggest = not GigaKloceDB.dpsSuggest
+                  GK.out("Suggest Chad by DPS: " .. onOff(GigaKloceDB.dpsSuggest)) end },
+            { text = "Suggest Kloc by DPS (after M+)",
+              isNotRadio = true, keepShownOnClick = true,
+              checked = function() return GigaKloceDB.dpsSuggestKloc end,
+              func = function() GigaKloceDB.dpsSuggestKloc = not GigaKloceDB.dpsSuggestKloc
+                  GK.out("Suggest Kloc by DPS: " .. onOff(GigaKloceDB.dpsSuggestKloc)) end },
             { text = "Blocked guilds...", notCheckable = true,
               func = function() if ShowBlockedGuilds then ShowBlockedGuilds() end end },
             { text = "Clear deletion history (tombstones)", notCheckable = true,
@@ -865,12 +875,23 @@ local function CreateKloceUI()
     end)
     gear:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
+    -- Znormalizuj kotwice do JEDNEGO TOPLEFT na biezacej pozycji (bez skoku). Potrzebne, bo ramka
+    -- przy pierwszym otwarciu jest kotwiczona CENTER, a StartSizing/StartMoving miesza anchory -> skok.
+    local function anchorTopLeft()
+        local x, y = KloceFrame:GetLeft(), KloceFrame:GetTop()
+        if x and y then
+            KloceFrame:ClearAllPoints()
+            KloceFrame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+            saved.posX, saved.posY = x, y
+        end
+    end
+
     -- przeciaganie
     KloceFrame:SetMovable(true); KloceFrame:EnableMouse(true); KloceFrame:RegisterForDrag("LeftButton")
     KloceFrame:SetScript("OnDragStart", function(self) self:StartMoving() end)
     KloceFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
-        saved.posX, saved.posY = self:GetLeft(), self:GetTop()
+        anchorTopLeft()
     end)
 
     -- zmiana rozmiaru
@@ -880,9 +901,12 @@ local function CreateKloceUI()
     resizeBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
     resizeBtn:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
     resizeBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-    resizeBtn:SetScript("OnMouseDown", function(_, b) if b == "LeftButton" then KloceFrame:StartSizing("BOTTOMRIGHT") end end)
+    resizeBtn:SetScript("OnMouseDown", function(_, b)
+        if b == "LeftButton" then anchorTopLeft(); KloceFrame:StartSizing("BOTTOMRIGHT") end
+    end)
     resizeBtn:SetScript("OnMouseUp", function()
         KloceFrame:StopMovingOrSizing()
+        anchorTopLeft()
         saved.sizeW, saved.sizeH = KloceFrame:GetWidth(), KloceFrame:GetHeight()
     end)
 
@@ -1138,6 +1162,27 @@ local function CreateKloceUI()
         return row
     end
 
+    -- Ulozenie wierszy ze ZMIENNA wysokoscia: wiersz rosnie pod zawiniety tekst (tekst wysrodkowany ->
+    -- rowny padding gora/dol). Zwraca laczna wysokosc. Woo lane PO ustawieniu tekstow (wysokosc zalezy od nich).
+    local VPAD = 5
+    local function LayoutRows(content, pool, count)
+        local y = 2
+        for i = 1, count do
+            local row = pool[i]
+            if row then
+                local th = row.text:GetStringHeight() or 0
+                local h = math.max(ROW_H - 1, math.ceil(th) + 2 * VPAD)   -- min = stara wysokosc; wieksza gdy zawija
+                row._top, row._h = y, h
+                row:ClearAllPoints()
+                row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
+                row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+                row:SetHeight(h)
+                y = y + h
+            end
+        end
+        return y + 2
+    end
+
     -- ScrollFrame w 7.3.5 przycina rendering, ale NIE kliki â€” chowamy wiersze poza oknem.
     local function CullRows(scroll, pool, count)
         local offset = scroll:GetVerticalScroll() or 0
@@ -1145,8 +1190,9 @@ local function CreateKloceUI()
         for i = 1, count do
             local row = pool[i]
             if row then
-                local top = (i - 1) * ROW_H + 2
-                if (top + ROW_H) >= offset and top <= (offset + viewH) then
+                local top = row._top or ((i - 1) * ROW_H + 2)
+                local h = row._h or ROW_H
+                if (top + h) >= offset and top <= (offset + viewH) then
                     row:Show()
                 else
                     row:Hide()
@@ -1275,6 +1321,7 @@ local function CreateKloceUI()
                 row.chip:Hide(); row.chip:SetWidth(1)
                 row.icon:Hide()
                 row.btn:Hide()
+                row.text:SetPoint("RIGHT", row, "RIGHT", -8, 0)   -- Active: brak btn/ikony/chipa -> tekst na pelna szerokosc
                 if it.header then
                     row:SetScript("OnClick", nil)
                     row:SetScript("OnEnter", nil); row:SetScript("OnLeave", nil)
@@ -1298,9 +1345,9 @@ local function CreateKloceUI()
                         if hd then hiStr = "  |cffffd200H:|r" .. keyLvlStr(hl) end
                     end
                     if it.noKey then
-                        row.text:SetText("  " .. nameStr .. ilvlStr .. hiStr .. noteStr)
+                        row.text:SetText(nameStr .. ilvlStr .. hiStr .. noteStr)
                     else
-                        row.text:SetText("  " .. nameStr .. ilvlStr .. hiStr
+                        row.text:SetText(nameStr .. ilvlStr .. hiStr
                             .. "  |cff888888—|r  " .. (it.dungeon or "?") .. "   " .. keyLvlStr(it.level) .. noteStr)
                     end
                     row.text:SetTextColor(1, 1, 1)
@@ -1344,7 +1391,7 @@ local function CreateKloceUI()
                 end
             end
             for i = #items + 1, #KloceFrame.items do KloceFrame.items[i]:Hide() end
-            contentLeft:SetHeight(math.max(#items * ROW_H + 4, 10))
+            local _lh = LayoutRows(contentLeft, KloceFrame.items, #items); contentLeft:SetHeight(math.max(_lh, 10))
             KloceFrame.leftN = #items
             CullRows(scrollLeft, KloceFrame.items, #items)
             return
@@ -1386,6 +1433,7 @@ local function CreateKloceUI()
         end
         for i, entry in ipairs(filtered) do
             local row = AcquireRow(contentLeft, KloceFrame.items, i)
+            row.text:SetPoint("RIGHT", row.icon, "LEFT", -5, 0)   -- przywroc kotwice do ikony (po trybie Active)
             local info = GetKloceInfo(entry)
             local cls = info and info.class
             local sp = info and info.spec
@@ -1421,7 +1469,7 @@ local function CreateKloceUI()
             end)
         end
         for i = count + 1, #KloceFrame.items do KloceFrame.items[i]:Hide() end
-        contentLeft:SetHeight(math.max(count * ROW_H + 4, 10))
+        local _lh = LayoutRows(contentLeft, KloceFrame.items, count); contentLeft:SetHeight(math.max(_lh, 10))
         KloceFrame.leftN = count
         CullRows(scrollLeft, KloceFrame.items, count)
     end
@@ -1475,7 +1523,7 @@ local function CreateKloceUI()
                 row:SetScript("OnLeave", function() GameTooltip:Hide() end)
             end
             for i = count + 1, #KloceFrame.partyItems do KloceFrame.partyItems[i]:Hide() end
-            contentRight:SetHeight(math.max(count * ROW_H + 4, 10))
+            local _rh = LayoutRows(contentRight, KloceFrame.partyItems, count); contentRight:SetHeight(math.max(_rh, 10))
             KloceFrame.rightN = count
             CullRows(scrollRight, KloceFrame.partyItems, count)
             return
@@ -1502,7 +1550,10 @@ local function CreateKloceUI()
             local row = AcquireRow(contentRight, KloceFrame.partyItems, i)
             row.chip:Hide(); row.chip:SetWidth(1); row.icon:Hide()
             row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-            row:SetScript("OnClick", function(_, button) if button == "RightButton" then openUserMenu(m.name) end end)
+            row:SetScript("OnClick", function(_, button)
+                if button == "RightButton" then openUserMenu(m.name)
+                elseif ShowKloceDetails then ShowKloceDetails(m.name) end   -- lewy klik = detale (jak w glownej liscie)
+            end)
             local info = GetKloceInfo(m.name)
             -- uzupelnij klase w info na podstawie zywej jednostki (gdy brak)
             if info and (not info.class or info.class == "") and m.class then info.class = m.class end
@@ -1535,7 +1586,7 @@ local function CreateKloceUI()
             end
         end
         for i = #members + 1, #KloceFrame.partyItems do KloceFrame.partyItems[i]:Hide() end
-        contentRight:SetHeight(math.max(#members * ROW_H + 4, 10))
+        local _rh = LayoutRows(contentRight, KloceFrame.partyItems, #members); contentRight:SetHeight(math.max(_rh, 10))
         KloceFrame.rightN = #members
         CullRows(scrollRight, KloceFrame.partyItems, #members)
     end
